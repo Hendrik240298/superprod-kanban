@@ -1,6 +1,6 @@
 # Project Kanban: design and implementation plan
 
-Status: first tag-based plugin implemented in `src/`; build and unit tests pass. Screenshots from a running installation confirm the initial board and lane-settings views render. Task moves, creation, cross-project preferences, and restart/sync persistence still need manual verification. This plan expands [IDEA.md](IDEA.md).
+Status: the tag-based plugin is implemented in `src/`; screenshots confirm the first board renders, and the user verified task creation and cross-lane dragging in the running app. Version 0.2.1 adds two templates, task ordering within lanes, a compact action menu, a less redundant board header, and scheduling/estimate card metadata; these additions and cross-project/restart persistence still need manual verification. This plan expands [IDEA.md](IDEA.md).
 
 ## Goal and scope
 
@@ -38,7 +38,7 @@ Important constraints:
 2. **Read-only board:** Implemented current-project To Do / In Progress / Done columns, unassigned/conflicting-tag fallback, backlog and subtask indicators, and hook-triggered refresh. **Still verify rendering in the app.**
 3. **Core editing:** Implemented project-aware task creation, native detail opening, completion changes, and cross-lane moves by selector or drag. Unit tests cover tag preservation and project scoping; **still verify host mutations in the app.**
 4. **Per-project configuration:** Implemented keyed synced view/lane preferences, tag selection and creation, lane aliases and ordering, and non-destructive removal. **Still verify persistence after restart/sync.**
-5. **Polish and release:** Basic responsive styling and keyboard-accessible move controls are included; further accessibility, edge-case and real-app testing remains after the first manual trial.
+5. **Polish and release:** Basic responsive board styling, keyboard-accessible move controls behind a card menu, and plugin-local task ordering within a lane are included. The board's embedded toolbar only shows Configure lanes; the host project header provides view switching. Task cards show schedule and estimate chips from native task data. The classic and seven-lane workflow templates are stored per project; the latter hides completed tasks and uses tag lanes, not native backlog/scheduling. Further accessibility, edge-case and real-app testing remains.
 
 ## Acceptance checks for a first usable version
 
@@ -48,10 +48,12 @@ Important constraints:
 - Existing tasks without lane tags, with stale lane tags, or carrying two lane tags remain visible exactly once; removing a configured lane does not delete tags or tasks.
 - A project's lane arrangement does not alter another project's arrangement; changing a lane label does not rename a global tag without an explicit separate action.
 - The normal task list remains available, and tasks edited in either view appear correctly in the other after refresh.
+- Cards can be reordered within a lane by dragging above/below another card; order survives reopening without rewriting Super Productivity's native task-list order.
+- Switching between Classic and Workflow preserves each template's configured lanes. Workflow has seven lanes, with Clarify as the untagged fallback, six tag lanes, and no Done column; completed tasks remain in the underlying project.
 
 ## Decisions deferred until the compatibility spike
 
 - Installed Super Productivity version and minimum supported plugin version.
 - Whether projects should share one default tag-lane template initially; local label aliases are part of configurable lanes, but can follow the core three-lane workflow.
 - How to handle backlog and subtasks in the first board (show, exclude explicitly, or defer with a visible explanation); do not silently drop them.
-- Whether a drag-and-drop UI belongs in the first usable version or a simpler move control should establish correct semantics first.
+- Workflow template chosen for the second preset: Clarify as the untagged fallback, six tag lanes, and no Done lane (completed tasks hidden). Classic retains To Do and Done. Both templates are configurable per project.

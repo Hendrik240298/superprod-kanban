@@ -31,20 +31,12 @@ select:focus-visible,
 }
 .shell {
   min-height: 100vh;
-  padding: var(--s2, 16px);
+  padding: var(--s, 8px) var(--s2, 16px);
 }
 .toolbar {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--s, 8px);
-  margin-bottom: var(--s2, 16px);
-}
-.toolbar h1 {
-  font-size: 1.15rem;
-  line-height: 1.4;
-  margin: 0 auto 0 0;
-  overflow-wrap: anywhere;
+  justify-content: flex-end;
+  margin-bottom: var(--s, 8px);
 }
 .toolbar button,
 .settings button,
@@ -56,6 +48,14 @@ select:focus-visible,
   color: var(--text-color, #292929);
   padding: 6px 10px;
 }
+.template-picker {
+  max-width: min(100%, 320px);
+  padding: 6px;
+  border: 1px solid var(--divider-color, #aaa5);
+  border-radius: 6px;
+  background: var(--card-bg, #fff);
+  color: var(--text-color, #292929);
+}
 .toolbar button:hover,
 .settings button:hover,
 .card button:hover {
@@ -66,27 +66,28 @@ select:focus-visible,
   font-size: .85rem;
 }
 .status {
-  min-height: 1.5em;
   margin: 0 0 var(--s, 8px);
+}
+.status:empty {
+  display: none;
 }
 .status.error {
   color: var(--c-warn, #bb2828);
 }
 .board {
   display: flex;
-  gap: var(--s2, 16px);
+  gap: var(--s, 8px);
   align-items: flex-start;
   overflow-x: auto;
   padding-bottom: var(--s2, 16px);
 }
 .lane {
-  flex: 0 0 min(290px, 85vw);
+  flex: 0 0 min(300px, 85vw);
   min-width: 0;
-  max-height: calc(100vh - 125px);
+  max-height: calc(100vh - 68px);
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--divider-color, #aaa5);
-  border-radius: var(--card-border-radius, 12px);
+  border-radius: 12px;
   background: var(--bg-darker, #efefef);
 }
 .lane.drop-target {
@@ -96,7 +97,7 @@ select:focus-visible,
   display: flex;
   gap: 8px;
   align-items: center;
-  padding: var(--s2, 16px);
+  padding: 12px;
 }
 .lane-header h2 {
   margin: 0;
@@ -106,8 +107,9 @@ select:focus-visible,
 }
 .count {
   border-radius: 999px;
-  padding: 2px 8px;
+  padding: 2px 9px;
   background: var(--card-bg, #fff);
+  font-size: .8rem;
 }
 .cards {
   padding: 0 var(--s, 8px) var(--s, 8px);
@@ -116,40 +118,90 @@ select:focus-visible,
 }
 .card {
   margin: 0 0 var(--s, 8px);
-  padding: var(--s2, 16px);
-  border-radius: var(--card-border-radius, 10px);
+  padding: 12px;
+  border: 1px solid var(--divider-color, #aaa3);
+  border-radius: 14px;
   background: var(--card-bg, #fff);
   box-shadow: var(--whiteframe-shadow-1dp, 0 1px 4px #0002);
 }
 .card[draggable="true"] {
   cursor: grab;
 }
+.card.drop-before {
+  border-top: 3px solid var(--c-primary, #7559d9);
+}
+.card.drop-after {
+  border-bottom: 3px solid var(--c-primary, #7559d9);
+}
 .card-title {
   border: 0 !important;
   background: none !important;
   padding: 0 !important;
-  width: 100%;
-  text-align: left;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-.card-meta {
-  margin: 6px 0;
-}
-.card-controls {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-.card-controls select {
   min-width: 0;
   flex: 1;
+  text-align: left;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
-.card-controls label {
+.card-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 4px;
+}
+.card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 9px;
+}
+.meta-chip {
+  border-radius: 999px;
+  background: var(--bg-darker, #efefef);
+  color: var(--text-color-muted, #666);
+  padding: 3px 8px;
+  font-size: .75rem;
+  line-height: 1.4;
+}
+.card-actions {
+  color: var(--text-color-muted, #777);
+  font-size: .85rem;
+}
+.card-actions summary {
+  cursor: pointer;
+  width: max-content;
+  list-style: none;
+  padding: 0 5px;
+  border-radius: 6px;
+}
+.card-actions summary::-webkit-details-marker {
+  display: none;
+}
+.card-actions summary:hover {
+  background: var(--bg-darker, #efefef);
+}
+.card-actions[open] {
+  flex: 0 0 100%;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--divider-color, #aaa5);
+}
+.card-actions[open] summary {
+  width: 100%;
+}
+.card-actions label {
   display: inline-flex;
   align-items: center;
-  white-space: nowrap;
-  gap: 3px;
+  gap: 4px;
+}
+.card-actions select {
+  min-width: 0;
+  max-width: 180px;
 }
 .add-row {
   display: flex;
@@ -181,6 +233,13 @@ select:focus-visible,
   font-size: 1rem;
   margin: 0 0 var(--s, 8px);
 }
+.template-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+}
 .settings-row {
   display: flex;
   align-items: center;
@@ -209,6 +268,6 @@ select:focus-visible,
     padding: 8px;
   }
   .lane {
-    max-height: calc(100vh - 150px);
+    max-height: calc(100vh - 64px);
   }
 }

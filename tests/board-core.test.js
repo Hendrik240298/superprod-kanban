@@ -13,6 +13,21 @@ const config = BoardCore.normalizeConfig({
   lanes: [{ tagId: "p" }, { tagId: "r", label: "Check" }],
 }, tags);
 
+Deno.test("scheduled date and time estimate metadata uses task API fields", () => {
+  equal(BoardCore.estimateLabel(0), null);
+  equal(BoardCore.estimateLabel(30000), "<1m");
+  equal(BoardCore.estimateLabel(5400000), "1h 30m");
+  equal(BoardCore.estimateLabel(7200000), "2h");
+  equal(BoardCore.scheduledDate({ dueDay: "2026-10-08" }).timed, false);
+  equal(BoardCore.scheduledDate({ dueDay: "2026-02-30" }), null);
+  equal(
+    BoardCore.scheduledDate({ dueWithTime: 100000, dueDay: "2026-10-08" })
+      .timed,
+    true,
+  );
+  equal(BoardCore.scheduledDate({}), null);
+});
+
 Deno.test("columns use tag names, local aliases and the two special lanes", () => {
   equal(BoardCore.columns(config, tags).map(({ label }) => label), [
     "To Do",
@@ -100,4 +115,70 @@ Deno.test("creating in any lane always assigns project and uses completion rathe
     tagIds: [],
     isDone: false,
   });
+});
+
+Deno.test("workflow template has Clarify and six tag lanes, but no Done", () => {
+  const workflowTags = BoardCore.WORKFLOW_TAGS.map((title, i) => ({
+    id: `w${i}`,
+    title,
+  }));
+  const workflow = BoardCore.normalizeConfig({
+    lanes: workflowTags.map((tag) => ({ tagId: tag.id })),
+  }, workflowTags);
+  equal(
+    BoardCore.columns(workflow, workflowTags, "workflow").map((lane) =>
+      lane.label
+    ),
+    [
+      "Clarify",
+      ...BoardCore.WORKFLOW_TAGS,
+    ],
+  );
+  const cards = BoardCore.projectCards(
+    [
+      { id: "a", projectId: "p", tagIds: [], isDone: false },
+      { id: "b", projectId: "p", tagIds: ["w0"], isDone: false },
+      { id: "c", projectId: "p", tagIds: ["w0"], isDone: true },
+    ],
+    "p",
+    workflow,
+    "workflow",
+  );
+  equal(cards.get("todo").map((task) => task.id), ["a"]);
+  equal(cards.get("w0").map((task) => task.id), ["b"]);
+  equal(cards.has("done"), false);
+  let rejected = false;
+  try {
+    BoardCore.movePatch({ tagIds: [] }, "done", workflow, "workflow");
+  } catch {
+    rejected = true;
+  }
+  equal(rejected, true);
+});
+
+Deno.test("lane-local order is applied without changing task records or other lanes", () => {
+  const cards = BoardCore.projectCards(
+    [
+      { id: "a", projectId: "p", tagIds: [], isDone: false },
+      { id: "b", projectId: "p", tagIds: [], isDone: false },
+      { id: "c", projectId: "p", tagIds: ["p"], isDone: false },
+    ],
+    "p",
+    config,
+  );
+  const order = BoardCore.normalizeOrder(
+    { todo: ["b", "a", "b", "deleted"] },
+    config,
+  );
+  equal(BoardCore.orderCards(cards, order).get("todo").map((task) => task.id), [
+    "b",
+    "a",
+  ]);
+  const reordered = BoardCore.placeTask(cards, order, "b", "todo", "a");
+  equal(reordered.todo, ["b", "a"]);
+  equal(reordered.p, ["c"]);
+  const next = BoardCore.placeTask(cards, order, "a", "p", null);
+  equal(next.todo, ["b"]);
+  equal(next.p, ["c", "a"]);
+  equal(cards.get("todo").map((task) => task.id), ["a", "b"]);
 });

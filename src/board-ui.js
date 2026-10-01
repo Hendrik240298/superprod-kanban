@@ -7,7 +7,9 @@
     tags: [],
     tasks: [],
     backlog: new Set(),
+    template: "classic",
     config: { lanes: [] },
+    order: {},
     settings: false,
     busy: false,
   };
@@ -27,7 +29,7 @@
       node.textContent = message;
       node.classList.toggle("error", isError);
     }
-    if (isError) api.log.err("Project Kanban:", message);
+    if (isError) console.error("Project Kanban:", message);
   }
 
   async function run(action) {
@@ -64,11 +66,17 @@
       return;
     }
     const projectId = ctx.id;
-    let [tags, tasks, projects, rawConfig] = await Promise.all([
+    const selectedTemplate = await api.loadSyncedData(`template-${projectId}`);
+    const template = selectedTemplate === "workflow" ? "workflow" : "classic";
+    const configKey = template === "workflow"
+      ? `workflow-lanes-${projectId}`
+      : `lanes-${projectId}`;
+    let [tags, tasks, projects, rawConfig, rawOrder] = await Promise.all([
       api.getAllTags(),
       api.getTasks(),
       api.getAllProjects(),
-      api.loadSyncedData(`lanes-${projectId}`),
+      api.loadSyncedData(configKey),
+      api.loadSyncedData(`order-${template}-${projectId}`),
     ]);
     if (
       token !== loadToken ||
@@ -77,17 +85,27 @@
 
     let stored = parseConfig(rawConfig);
     if (!stored) {
-      // Prefer the tag used by Super Productivity's built-in Kanban; create a
-      // regular tag only if it does not exist yet. Persist its ID, never its title.
-      let progress = tags.find((tag) => tag.id === "KANBAN_IN_PROGRESS") ||
-        tags.find((tag) => tag.title?.toLowerCase() === "in progress");
-      if (!progress) {
-        const id = await api.addTag({ title: "In Progress" });
-        progress = { id, title: "In Progress" };
-        tags = [...tags, progress];
+      const names = template === "workflow"
+        ? BoardCore.WORKFLOW_TAGS
+        : ["In Progress"];
+      const lanes = [];
+      for (const title of names) {
+        // Reuse an existing tag; create only when the template is first selected.
+        let tag = title === "In Progress"
+          ? tags.find((item) => item.id === "KANBAN_IN_PROGRESS")
+          : null;
+        tag ||= tags.find((item) =>
+          item.title?.toLowerCase() === title.toLowerCase()
+        );
+        if (!tag) {
+          const id = await api.addTag({ title });
+          tag = { id, title };
+          tags = [...tags, tag];
+        }
+        lanes.push({ tagId: tag.id });
       }
-      stored = { lanes: [{ tagId: progress.id }] };
-      await api.persistDataSynced(JSON.stringify(stored), `lanes-${projectId}`);
+      stored = { lanes };
+      await api.persistDataSynced(JSON.stringify(stored), configKey);
     }
     if (
       token !== loadToken ||
@@ -96,7 +114,13 @@
     state.ctx = ctx;
     state.tags = tags;
     state.tasks = tasks;
+    state.template = template;
     state.config = BoardCore.normalizeConfig(stored, tags);
+    state.order = BoardCore.normalizeOrder(
+      parseConfig(rawOrder),
+      state.config,
+      template,
+    );
     state.backlog = new Set(
       projects.find((project) => project.id === projectId)?.backlogTaskIds ||
         [],
@@ -106,8 +130,19 @@
 
   async function saveConfig(next) {
     if (!state.ctx) return;
-    await api.persistDataSynced(JSON.stringify(next), `lanes-${state.ctx.id}`);
+    const key = state.template === "workflow"
+      ? `workflow-lanes-${state.ctx.id}`
+      : `lanes-${state.ctx.id}`;
+    await api.persistDataSynced(JSON.stringify(next), key);
     state.config = BoardCore.normalizeConfig(next, state.tags);
+  }
+
+  async function saveOrder(next) {
+    await api.persistDataSynced(
+      JSON.stringify(next),
+      `order-${state.template}-${state.ctx.id}`,
+    );
+    state.order = next;
   }
 
   function control(label, onClick, className) {
@@ -121,12 +156,6 @@
     if (!state.ctx) return;
     const shell = el("div", "shell");
     const toolbar = el("header", "toolbar");
-    toolbar.append(el("h1", "", `${state.ctx.title} · Kanban`));
-    toolbar.append(control("List view", () =>
-      void run(async () => {
-        await api.persistDataSynced("list", `view-${state.ctx.id}`);
-        api.closeWorkContextView();
-      })));
     toolbar.append(
       control(state.settings ? "Close settings" : "Configure lanes", () => {
         state.settings = !state.settings;
@@ -138,11 +167,15 @@
     shell.lastChild.id = "board-status";
     if (state.settings) shell.append(renderSettings());
     const board = el("div", "board");
-    const columns = BoardCore.columns(state.config, state.tags);
-    const grouped = BoardCore.projectCards(
-      state.tasks,
-      state.ctx.id,
-      state.config,
+    const columns = BoardCore.columns(state.config, state.tags, state.template);
+    const grouped = BoardCore.orderCards(
+      BoardCore.projectCards(
+        state.tasks,
+        state.ctx.id,
+        state.config,
+        state.template,
+      ),
+      state.order,
     );
     for (const column of columns) {
       board.append(
@@ -164,7 +197,9 @@
     );
     section.append(header);
     const cards = el("div", "cards");
-    for (const task of tasks) cards.append(renderCard(task, id, columns));
+    for (const [index, task] of tasks.entries()) {
+      cards.append(renderCard(task, id, columns, tasks[index + 1]?.id || null));
+    }
     if (!tasks.length) cards.append(el("p", "muted empty", "No tasks"));
     section.append(cards);
     section.addEventListener("dragover", (event) => {
@@ -181,7 +216,7 @@
       event.preventDefault();
       section.classList.remove("drop-target");
       const taskId = event.dataTransfer?.getData("text/plain");
-      if (taskId) void move(taskId, id);
+      if (taskId) void move(taskId, id, null);
     });
 
     const form = el("form", "add-row");
@@ -202,7 +237,12 @@
       void run(async () => {
         await api.addTask({
           title,
-          ...BoardCore.createFields(projectId, id, state.config),
+          ...BoardCore.createFields(
+            projectId,
+            id,
+            state.config,
+            state.template,
+          ),
         });
         input.value = "";
       });
@@ -211,7 +251,7 @@
     return section;
   }
 
-  function renderCard(task, currentLane, columns) {
+  function renderCard(task, currentLane, columns, nextCardId) {
     const card = el("article", "card");
     const movable = !task.parentId;
     card.draggable = movable;
@@ -221,27 +261,68 @@
         if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
       });
     }
+    card.addEventListener("dragover", (event) => {
+      if (!event.dataTransfer?.types.includes("text/plain")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const before = event.clientY <
+        card.getBoundingClientRect().top + card.offsetHeight / 2;
+      card.classList.toggle("drop-before", before);
+      card.classList.toggle("drop-after", !before);
+    });
+    card.addEventListener(
+      "dragleave",
+      () => card.classList.remove("drop-before", "drop-after"),
+    );
+    card.addEventListener("drop", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      card.classList.remove("drop-before", "drop-after");
+      const taskId = event.dataTransfer?.getData("text/plain");
+      if (taskId && taskId !== task.id) {
+        const before = event.clientY <
+          card.getBoundingClientRect().top + card.offsetHeight / 2;
+        void move(taskId, currentLane, before ? task.id : nextCardId);
+      }
+    });
+    const heading = el("div", "card-heading");
     const title = control(task.title || "(Untitled task)", () => {
       void api.selectTask(task.id).catch((error) =>
         status(String(error), true)
       );
     }, "card-title");
     title.title = "Open task details";
-    card.append(title);
-    const info = [];
-    if (task.parentId) info.push("Subtask · open in task details to edit");
+    heading.append(title);
+    const meta = el("div", "card-meta");
+    const scheduled = BoardCore.scheduledDate(task);
+    if (scheduled) {
+      const label = new Intl.DateTimeFormat(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        ...(scheduled.timed ? { hour: "numeric", minute: "2-digit" } : {}),
+      }).format(scheduled.date);
+      meta.append(el("span", "meta-chip", `◷ Scheduled ${label}`));
+    }
+    const estimate = BoardCore.estimateLabel(task.timeEstimate);
+    if (estimate) meta.append(el("span", "meta-chip", `◴ Est. ${estimate}`));
+    if (task.parentId) {
+      meta.append(el("span", "meta-chip", "Subtask · open details to edit"));
+    }
     if (
       state.backlog.has(task.id) ||
       (task.parentId && state.backlog.has(task.parentId))
-    ) info.push("Backlog");
+    ) meta.append(el("span", "meta-chip", "Backlog"));
     if (task.subTaskIds?.length) {
-      info.push(`${task.subTaskIds.length} subtasks`);
-    }
-    if (info.length) {
-      card.append(el("div", "muted card-meta", info.join(" · ")));
+      meta.append(
+        el("span", "meta-chip", `${task.subTaskIds.length} subtasks`),
+      );
     }
     if (movable) {
-      const controls = el("div", "card-controls");
+      const controls = el("details", "card-actions");
+      const summary = el("summary", "", "⋯");
+      summary.setAttribute("aria-label", `Actions for ${task.title}`);
+      controls.append(summary);
       const label = el("label", "", "Move to");
       const select = el("select");
       select.setAttribute("aria-label", `Move ${task.title} to lane`);
@@ -254,12 +335,28 @@
       select.addEventListener("change", () => void move(task.id, select.value));
       label.append(select);
       controls.append(label);
-      card.append(controls);
+      if (state.template === "workflow") {
+        controls.append(control("Complete", () =>
+          void run(async () => {
+            const latest = (await api.getTasks()).find((entry) =>
+              entry.id === task.id && entry.projectId === state.ctx?.id
+            );
+            if (!latest) throw new Error("Task changed or left this project.");
+            await api.updateTask(
+              task.id,
+              BoardCore.movePatch(latest, "done", state.config),
+            );
+          })));
+      }
+      heading.append(controls);
     }
+    card.append(heading);
+    if (meta.children.length) card.append(meta);
     return card;
   }
 
-  function move(taskId, laneId) {
+  // beforeId=undefined means a selector change; null means append on drop.
+  function move(taskId, laneId, beforeId) {
     const task = state.tasks.find((entry) =>
       entry.id === taskId && entry.projectId === state.ctx?.id
     );
@@ -273,23 +370,70 @@
           "Task changed or left this project. Refresh and try again.",
         );
       }
-      const patch = BoardCore.movePatch(latest, laneId, state.config);
-      if (
-        JSON.stringify(patch.tagIds) === JSON.stringify(latest.tagIds || []) &&
-        patch.isDone === latest.isDone
-      ) return;
-      await api.updateTask(taskId, patch);
+      const patch = BoardCore.movePatch(
+        latest,
+        laneId,
+        state.config,
+        state.template,
+      );
+      const currentLane = BoardCore.laneFor(
+        latest,
+        state.config,
+        state.template,
+      );
+      const changes =
+        JSON.stringify(patch.tagIds) !== JSON.stringify(latest.tagIds || []) ||
+        patch.isDone !== latest.isDone;
+      if (changes) await api.updateTask(taskId, patch);
+      if (currentLane === laneId && beforeId === undefined) return;
+      const grouped = BoardCore.orderCards(
+        BoardCore.projectCards(
+          state.tasks,
+          state.ctx.id,
+          state.config,
+          state.template,
+        ),
+        state.order,
+      );
+      await saveOrder(
+        BoardCore.placeTask(grouped, state.order, taskId, laneId, beforeId),
+      );
     });
   }
 
   function renderSettings() {
     const panel = el("section", "settings");
-    panel.append(el("h2", "", "Lanes for this project"));
+    panel.append(el("h2", "", "Board settings"));
+    const templateRow = el("label", "template-row", "Template");
+    const templatePicker = el("select", "template-picker");
+    templatePicker.setAttribute("aria-label", "Kanban template");
+    for (
+      const [id, label] of [
+        ["classic", "Classic · To Do / In Progress / Done"],
+        ["workflow", "Workflow · Clarify / Backlog / …"],
+      ]
+    ) {
+      const option = el("option", "", label);
+      option.value = id;
+      templatePicker.append(option);
+    }
+    templatePicker.value = state.template;
+    templatePicker.addEventListener("change", () =>
+      void run(async () => {
+        await api.persistDataSynced(
+          templatePicker.value,
+          `template-${state.ctx.id}`,
+        );
+      }));
+    templateRow.append(templatePicker);
+    panel.append(templateRow);
     panel.append(
       el(
         "p",
         "muted",
-        "To Do and Done are built in. Tag lanes are project-specific; tags themselves are shared across Super Productivity.",
+        state.template === "workflow"
+          ? "Clarify holds unfinished tasks without a configured lane tag; completed tasks are hidden. Other lanes use tags."
+          : "To Do holds unfinished tasks without a configured lane tag; Done shows completed tasks. Other lanes use tags.",
       ),
     );
     state.config.lanes.forEach((lane, index) => {
@@ -312,8 +456,13 @@
           await saveConfig({ lanes });
         }));
       row.append(alias);
-      row.append(control("↑", () => void reorder(index, -1)));
-      row.append(control("↓", () => void reorder(index, 1)));
+      const up = control("↑", () => void reorder(index, -1));
+      up.disabled = index === 0;
+      up.setAttribute("aria-label", `Move ${tag?.title || "lane"} left`);
+      const down = control("↓", () => void reorder(index, 1));
+      down.disabled = index === state.config.lanes.length - 1;
+      down.setAttribute("aria-label", `Move ${tag?.title || "lane"} right`);
+      row.append(up, down);
       row.append(control("Remove", () =>
         void run(async () => {
           await saveConfig({
