@@ -281,20 +281,10 @@ select:focus-visible,
   padding: var(--s, 8px);
   border-top: 1px solid var(--divider-color, #aaa5);
 }
-.add-main,
-.add-actions,
-.add-fields,
-.chosen-tags {
+.add-main {
   display: flex;
-  flex-wrap: wrap;
   gap: 6px;
   align-items: center;
-}
-.add-main {
-  flex-wrap: nowrap;
-}
-.chosen-tags:empty {
-  display: none;
 }
 .add-row [hidden] {
   display: none;
@@ -307,22 +297,8 @@ select:focus-visible,
   border-radius: 6px;
   padding: 6px;
 }
-.add-main input,
-.tag-search {
+.add-main input {
   width: 100%;
-}
-.add-fields input {
-  max-width: 100%;
-}
-.add-actions button,
-.add-fields button,
-.chosen-tags button {
-  padding: 4px 7px;
-  font-size: .8rem;
-}
-.add-actions button,
-.chosen-tag {
-  border-radius: 999px !important;
 }
 .input-suggestions {
   max-height: 160px;

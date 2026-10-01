@@ -23,6 +23,9 @@ class Node {
   setAttribute(key, value) {
     this.attributes[key] = value;
   }
+  removeAttribute(key) {
+    delete this.attributes[key];
+  }
   addEventListener(key, fn) {
     this.listeners[key] = fn;
   }
@@ -64,10 +67,11 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
       descendants(app, (node) => node.id === id)[0] || null,
   };
   const values = new Map();
-  const tags = [{ id: "progress", title: "In Progress" }, {
-    id: "extra",
-    title: "Extra",
-  }];
+  const tags = [
+    { id: "progress", title: "In Progress" },
+    { id: "extra", title: "Extra" },
+    { id: "focus", title: "Focus Time" },
+  ];
   const tasks = [
     {
       id: "a",
@@ -199,7 +203,7 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   picker.value = "workflow";
   picker.fire("change");
   await flush();
-  if (values.get("template-p") !== "workflow" || tags.length !== 8) {
+  if (values.get("template-p") !== "workflow" || tags.length !== 9) {
     throw new Error("Workflow template did not initialize its six tag lanes");
   }
   const lanes = descendants(
@@ -244,230 +248,136 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   if (descendants(app, (node) => node.tag === "article").length !== 1) {
     throw new Error("Completed task should be hidden from Workflow");
   }
-  const firstForm = descendants(
-    app,
-    (node) => node.tag === "form" && node.className === "add-row",
-  )[0];
-  const titleInput = descendants(
-    firstForm,
-    (node) => node.tag === "input" && node.type === "text" && !node.className,
-  )[0];
-  titleInput.value = "Write report #ex";
-  titleInput.selectionStart = titleInput.value.length;
-  titleInput.fire("input");
-  const extraOption = descendants(
-    firstForm,
-    (node) =>
-      node.className === "suggestion-option" && node.textContent === "Extra",
-  )[0];
+  const form = () =>
+    descendants(
+      app,
+      (node) => node.tag === "form" && node.className === "add-row",
+    )[0];
+  const titleInput = (parent) =>
+    descendants(
+      parent,
+      (node) =>
+        node.tag === "input" &&
+        node.attributes["aria-label"] === "New task in Clarify",
+    )[0];
+  const type = (parent, text) => {
+    const title = titleInput(parent);
+    title.value = text;
+    title.selectionStart = text.length;
+    title.fire("input");
+    return title;
+  };
+  const options = (parent) =>
+    descendants(parent, (node) => node.className === "suggestion-option").map((
+      node,
+    ) => node.textContent);
+  const submit = async (parent) => {
+    parent.fire("submit", { preventDefault() {} });
+    await flush();
+  };
+  const firstForm = form();
   if (
-    !extraOption ||
+    descendants(firstForm, (node) =>
+      node.tag === "button" &&
+      ["Schedule", "# Tags", "Estimate"].includes(node.textContent)).length ||
     descendants(
       firstForm,
-      (node) =>
-        node.className === "suggestion-option" && node.textContent === "Doing",
+      (node) => node.type === "date" || node.type === "time",
     ).length
   ) {
-    throw new Error("# autocomplete did not suggest the matching non-lane tag");
+    throw new Error("Inline add form still has extra controls");
   }
-  titleInput.fire("keydown", { key: "Enter", preventDefault() {} });
-  if (
-    titleInput.value !== "Write report" ||
-    !descendants(firstForm, (node) => node.className === "chosen-tag").length
-  ) {
-    throw new Error("# autocomplete did not add the tag and remove the token");
+  const firstTitle = type(firstForm, "Write report #ex");
+  if (JSON.stringify(options(firstForm)) !== JSON.stringify(["Extra"])) {
+    throw new Error("# autocomplete did not suggest an existing non-lane tag");
   }
-  descendants(
-    firstForm,
-    (node) => node.tag === "button" && node.textContent === "Schedule",
-  )[0].fire("click");
-  const dateInput = descendants(firstForm, (node) => node.type === "date")[0];
-  const timeInput = descendants(firstForm, (node) => node.type === "time")[0];
-  dateInput.value = "2026-10-22";
-  dateInput.fire("change");
-  timeInput.value = "14:30";
-  timeInput.fire("change");
-  descendants(
-    firstForm,
-    (node) => node.tag === "button" && node.textContent === "Estimate",
-  )[0].fire("click");
-  const estimateInput = descendants(
-    firstForm,
-    (node) =>
-      node.tag === "input" && node.className === "" &&
-      node.attributes["aria-label"] === "Time estimate",
-  )[0];
-  estimateInput.value = "1h 30m";
-  estimateInput.fire("input");
-  firstForm.fire("submit", { preventDefault() {} });
-  await flush();
+  firstTitle.fire("keydown", { key: "Enter", preventDefault() {} });
+  if (firstTitle.value !== "Write report #Extra" || added.length) {
+    throw new Error("Enter did not complete #tag in the title");
+  }
+  type(firstForm, "Write report #Extra @2026-10-22 14:30 1h");
+  if (JSON.stringify(options(firstForm)) !== JSON.stringify(["1h", "1h 30m"])) {
+    throw new Error("Estimate suggestions were hidden after a scheduled time");
+  }
+  type(firstForm, "Write report #Extra @2026-10-22 14:30 1h 30m");
+  await submit(firstForm);
   if (
-    added.length !== 1 || added[0].projectId !== "p" ||
-    added[0].title !== "Write report" ||
+    added.length !== 1 || added[0].title !== "Write report" ||
+    added[0].projectId !== "p" ||
     JSON.stringify(added[0].tagIds) !== JSON.stringify(["extra"]) ||
-    added[0].timeEstimate !== 5400000 || "dueWithTime" in added[0] ||
+    added[0].timeEstimate !== 5400000 || "dueDay" in added[0] ||
     !updates.some(({ id, patch }) =>
       id === "new-1" &&
       patch.dueWithTime === new Date(2026, 9, 22, 14, 30).getTime()
     )
   ) {
     throw new Error(
-      `Timed task was not created correctly: ${
-        JSON.stringify({ added, updates })
+      `Keyboard entry did not persist its fields: ${
+        JSON.stringify({ added, updates, errors })
       }`,
     );
   }
-  const nextForm = descendants(
-    app,
-    (node) => node.tag === "form" && node.className === "add-row",
-  )[0];
-  const nextTitle = descendants(
-    nextForm,
-    (node) =>
-      node.tag === "input" &&
-      node.attributes["aria-label"] === "New task in Clarify",
-  )[0];
-  nextTitle.value = "All-day task";
-  nextTitle.fire("input");
-  descendants(
-    nextForm,
-    (node) => node.tag === "button" && node.textContent === "Schedule",
-  )[0].fire("click");
-  const nextDate = descendants(nextForm, (node) => node.type === "date")[0];
-  nextDate.value = "2026-10-23";
-  nextDate.fire("change");
-  nextForm.fire("submit", { preventDefault() {} });
-  await flush();
+  const allDayForm = form();
+  type(allDayForm, "All-day task @2026-10-23");
+  await submit(allDayForm);
   if (
-    added.length !== 2 || added[1].dueDay !== "2026-10-23" ||
-    "dueWithTime" in added[1]
+    added.length !== 2 || added[1].title !== "All-day task" ||
+    added[1].dueDay !== "2026-10-23"
   ) {
-    throw new Error("All-day schedule was not passed directly to addTask");
+    throw new Error("Typed all-day schedule was not saved");
   }
-  const lastForm = descendants(
-    app,
-    (node) => node.tag === "form" && node.className === "add-row",
-  )[0];
-  const lastTitle = descendants(
-    lastForm,
-    (node) => node.attributes["aria-label"] === "New task in Clarify",
-  )[0];
-  lastTitle.value = "Quick task";
-  lastTitle.fire("input");
-  descendants(
-    lastForm,
-    (node) => node.tag === "button" && node.textContent === "# Tags",
-  )[0].fire("click");
-  const tagSearch =
-    descendants(lastForm, (node) => node.className === "tag-search")[0];
-  tagSearch.value = "extra";
-  tagSearch.fire("input");
-  tagSearch.fire("keydown", { key: "Enter", preventDefault() {} });
+  const estimateForm = form();
+  const estimateTitle = type(estimateForm, "Quick task 1h");
   if (
-    added.length !== 2 ||
-    !descendants(lastForm, (node) => node.className === "chosen-tag").length
+    JSON.stringify(options(estimateForm)) !== JSON.stringify(["1h", "1h 30m"])
   ) {
+    throw new Error("Duration suggestions did not appear during typing");
+  }
+  estimateTitle.fire("keydown", { key: "ArrowDown", preventDefault() {} });
+  estimateTitle.fire("keydown", { key: "Enter", preventDefault() {} });
+  if (estimateTitle.value !== "Quick task 1h 30m" || added.length !== 2) {
     throw new Error(
-      "Tag search Enter either submitted early or failed to select a tag",
+      "Duration autocomplete submitted early or inserted the wrong value",
     );
   }
-  descendants(
-    lastForm,
-    (node) => node.tag === "button" && node.textContent === "Estimate",
-  )[0].fire("click");
-  descendants(
-    lastForm,
-    (node) => node.tag === "button" && node.textContent === "2h",
-  )[0].fire("click");
-  descendants(
-    lastForm,
-    (node) => node.tag === "button" && node.textContent === "Schedule",
-  )[0].fire("click");
-  const invalidTime = descendants(lastForm, (node) => node.type === "time")[0];
-  invalidTime.value = "14:30";
-  invalidTime.fire("change");
-  lastForm.fire("submit", { preventDefault() {} });
+  await submit(estimateForm);
   if (
-    added.length !== 2 ||
-    !errors.some((error) => error.includes("Choose a scheduled date"))
+    added.length !== 3 || added[2].timeEstimate !== 5400000 ||
+    added[2].title !== "Quick task"
   ) {
-    throw new Error("A time without a date was not rejected visibly");
+    throw new Error("Keyboard estimate was not saved");
   }
-  const lastDate = descendants(lastForm, (node) => node.type === "date")[0];
-  lastDate.value = "2026-10-24";
-  lastDate.fire("change");
-  lastForm.fire("submit", { preventDefault() {} });
-  await flush();
-  if (
-    added.length !== 3 || added[2].timeEstimate !== 7200000 ||
-    !added[2].tagIds.includes("extra")
-  ) {
-    throw new Error("Tag search or estimate preset was not applied");
+  const dateForm = form();
+  const dateTitle = type(dateForm, "Review @tom");
+  if (!options(dateForm).includes("tomorrow")) {
+    throw new Error("@tom did not suggest tomorrow");
   }
-  const dateForm = descendants(
-    app,
-    (node) => node.tag === "form" && node.className === "add-row",
-  )[0];
-  const dateTitle = descendants(
-    dateForm,
-    (node) => node.attributes["aria-label"] === "New task in Clarify",
-  )[0];
-  dateTitle.value = "Review @tom";
-  dateTitle.selectionStart = dateTitle.value.length;
-  dateTitle.fire("input");
-  const tomorrow = descendants(
-    dateForm,
-    (node) =>
-      node.className === "suggestion-option" &&
-      node.textContent === "tomorrow",
-  )[0];
-  if (!tomorrow) throw new Error("@tom did not suggest tomorrow");
   dateTitle.fire("keydown", { key: "Enter", preventDefault() {} });
-  const expectedTomorrow = BoardCore.resolveDateSuggestion("tomorrow").day;
-  if (
-    dateTitle.value !== "Review" ||
-    descendants(dateForm, (node) => node.type === "date")[0].value !==
-      expectedTomorrow
-  ) {
-    throw new Error(
-      "Selecting @tomorrow did not strip the token and set the date",
-    );
+  if (dateTitle.value !== "Review @tomorrow" || added.length !== 3) {
+    throw new Error("Enter did not complete @tomorrow in the title");
   }
-  dateForm.fire("submit", { preventDefault() {} });
-  await flush();
+  await submit(dateForm);
   if (
     added.length !== 4 || added[3].title !== "Review" ||
-    added[3].dueDay !== expectedTomorrow
+    added[3].dueDay !== BoardCore.resolveDateSuggestion("tomorrow").day
   ) {
-    throw new Error("@tomorrow did not persist an all-day schedule");
+    throw new Error("@tomorrow did not save an all-day schedule");
   }
-  const timeForm = descendants(
-    app,
-    (node) => node.tag === "form" && node.className === "add-row",
-  )[0];
-  const timeTitle = descendants(
-    timeForm,
-    (node) => node.attributes["aria-label"] === "New task in Clarify",
-  )[0];
-  timeTitle.value = "Follow up @in 1";
-  timeTitle.selectionStart = timeTitle.value.length;
-  timeTitle.fire("input");
-  const hour = descendants(
-    timeForm,
-    (node) =>
-      node.className === "suggestion-option" &&
-      node.textContent === "in 1 hour",
-  )[0];
-  if (!hour) throw new Error("@in 1 did not suggest a timed schedule");
-  hour.fire("click");
-  if (
-    timeTitle.value !== "Follow up" ||
-    !descendants(timeForm, (node) => node.type === "time")[0].value
-  ) {
-    throw new Error("Selecting a timed @ suggestion did not set the time");
+  const timedForm = form();
+  const timedTitle = type(timedForm, "Follow up @in 1");
+  if (!options(timedForm).includes("in 1 hour")) {
+    throw new Error("Timed @ suggestions missing");
   }
-  timeForm.fire("submit", { preventDefault() {} });
-  await flush();
+  timedTitle.fire("keydown", { key: "Enter", preventDefault() {} });
+  if (timedTitle.value !== "Follow up @in 1 hour") {
+    throw new Error("Timed @ completion failed");
+  }
+  type(timedForm, "Follow up @in 1 hour 1h");
+  if (JSON.stringify(options(timedForm)) !== JSON.stringify(["1h", "1h 30m"])) {
+    throw new Error("Estimate suggestions were hidden after a relative date");
+  }
+  type(timedForm, "Follow up @in 1 hour");
+  await submit(timedForm);
   if (
     added.length !== 5 || "dueDay" in added[4] ||
     !updates.some(({ id, patch }) =>
@@ -475,46 +385,31 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
       Math.abs(patch.dueWithTime - (Date.now() + 3600000)) < 60000
     )
   ) {
-    throw new Error("Timed @ suggestion did not persist a timed schedule");
+    throw new Error("Typed scheduled time was not saved");
   }
-  const exactForm = descendants(
-    app,
-    (node) => node.tag === "form" && node.className === "add-row",
-  )[0];
-  const exactTitle = descendants(
-    exactForm,
-    (node) => node.attributes["aria-label"] === "New task in Clarify",
-  )[0];
-  exactTitle.value = "Write @today";
-  exactTitle.selectionStart = exactTitle.value.length;
-  exactTitle.fire("input");
-  exactForm.fire("submit", { preventDefault() {} });
-  await flush();
+  const invalidForm = form();
+  type(invalidForm, "Repeat @every friday");
+  await submit(invalidForm);
   if (
-    added.length !== 6 || added[5].title !== "Write" ||
-    added[5].dueDay !== BoardCore.resolveDateSuggestion("today").day
+    added.length !== 5 ||
+    !errors.some((text) => text.includes("@ date suggestion"))
   ) {
-    throw new Error("Submitting an exact @ date did not apply it");
+    throw new Error("Unsupported @ syntax silently created a task");
   }
-  const unsupportedForm = descendants(
-    app,
-    (node) => node.tag === "form" && node.className === "add-row",
-  )[0];
-  const unsupportedTitle = descendants(
-    unsupportedForm,
-    (node) => node.attributes["aria-label"] === "New task in Clarify",
-  )[0];
-  unsupportedTitle.value = "Repeat @every friday";
-  unsupportedTitle.selectionStart = unsupportedTitle.value.length;
-  unsupportedTitle.fire("input");
-  unsupportedForm.fire("submit", { preventDefault() {} });
+  const quotedTitle = type(invalidForm, "New #fo");
+  if (!options(invalidForm).includes("Focus Time")) {
+    throw new Error("Multiword tag suggestion missing");
+  }
+  quotedTitle.fire("keydown", { key: "Enter", preventDefault() {} });
+  if (quotedTitle.value !== 'New #"Focus Time"') {
+    throw new Error("Multiword tag was not quoted in input");
+  }
+  await submit(invalidForm);
   if (
-    added.length !== 6 ||
-    !errors.some((text) =>
-      text.includes("Other @ expressions are not supported")
-    )
+    added.length !== 6 || added[5].title !== "New" ||
+    JSON.stringify(added[5].tagIds) !== JSON.stringify(["focus"])
   ) {
-    throw new Error("Unsupported @ text was silently created as a task");
+    throw new Error("Selected multiword tag did not persist");
   }
   if (!hooks.has("anyTaskUpdate")) throw new Error("Task refresh hook missing");
 });

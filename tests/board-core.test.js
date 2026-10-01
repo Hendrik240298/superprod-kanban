@@ -100,6 +100,68 @@ Deno.test("@ suggestions resolve common dates and times without guessing other t
   });
 });
 
+Deno.test("one-line task entry parses #tags, @schedules and duration text", () => {
+  const now = new Date(2026, 9, 1, 10, 30);
+  const allTags = [...tags, { id: "extra", title: "Extra" }, {
+    id: "week",
+    title: "This Week",
+  }];
+  equal(
+    BoardCore.parseQuickAdd(
+      "Write report #Extra @2026-10-22 14:30 1h 30m",
+      allTags,
+      config,
+      "todo",
+      now,
+    ),
+    {
+      title: "Write report",
+      tagIds: ["extra"],
+      schedule: { dueWithTime: new Date(2026, 9, 22, 14, 30).getTime() },
+      timeEstimate: 5400000,
+    },
+  );
+  equal(
+    BoardCore.parseQuickAdd(
+      'Review #"This Week" @tomorrow 45m',
+      allTags,
+      config,
+      "todo",
+      now,
+    ),
+    {
+      title: "Review",
+      tagIds: ["week"],
+      schedule: { dueDay: "2026-10-02" },
+      timeEstimate: 2700000,
+    },
+  );
+  equal(
+    BoardCore.parseQuickAdd("Work #Progress", allTags, config, "p", now).tagIds,
+    [],
+  );
+  equal(BoardCore.estimateSuggestions("1h"), ["1h", "1h 30m"]);
+  for (
+    const title of [
+      "Task #missing",
+      "Task #",
+      "Task #Progress",
+      "Task @every friday",
+      "Task @tomorrow @today",
+      "Task 1h 30m 2h",
+      "@today 1h",
+    ]
+  ) {
+    let rejected = false;
+    try {
+      BoardCore.parseQuickAdd(title, allTags, config, "todo", now);
+    } catch {
+      rejected = true;
+    }
+    equal(rejected, true);
+  }
+});
+
 Deno.test("columns use tag names, local aliases and the two special lanes", () => {
   equal(BoardCore.columns(config, tags).map(({ label }) => label), [
     "To Do",

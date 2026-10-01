@@ -226,21 +226,13 @@
 
   function renderAddForm(lane, laneId) {
     const key = `${state.ctx.id}:${state.template}:${laneId}`;
-    const draft = state.drafts.get(key) || {
-      title: "",
-      tagIds: [],
-      day: "",
-      time: "",
-      estimate: "",
-    };
-    state.drafts.set(key, draft);
     const form = el("form", "add-row");
     const main = el("div", "add-main");
     const input = el("input");
     input.type = "text";
     input.required = true;
     input.maxLength = 500;
-    input.value = draft.title;
+    input.value = state.drafts.get(key) || "";
     input.placeholder = `Add to ${lane.label}`;
     input.setAttribute("aria-label", `New task in ${lane.label}`);
     const add = el("button", "", "Add");
@@ -257,131 +249,108 @@
     input.setAttribute("aria-expanded", "false");
     form.append(suggestions);
 
-    const actions = el("div", "add-actions");
-    const dateButton = control("Schedule", () => {
-      hideSuggestions();
-      tagSearch.hidden = true;
-      dateFields.hidden = !dateFields.hidden;
-      if (!dateFields.hidden) dayInput.focus();
-    });
-    const tagButton = control("# Tags", () => {
-      tagSearch.value = activeToken?.kind === "tag"
-        ? input.value.slice(activeToken.start + 1, activeToken.end)
-        : "";
-      if (activeToken?.kind === "date") hideSuggestions();
-      tagSearch.hidden = !tagSearch.hidden;
-      if (!tagSearch.hidden) {
-        tagSearch.focus();
-        showSuggestions(tagSearch.value, "tag");
-      } else hideSuggestions();
-    });
-    const estimateButton = control("Estimate", () => {
-      hideSuggestions();
-      tagSearch.hidden = true;
-      estimateFields.hidden = !estimateFields.hidden;
-      if (!estimateFields.hidden) estimateInput.focus();
-    });
-    actions.append(dateButton, tagButton, estimateButton);
-    actions.hidden = !draft.title && !draft.tagIds.length && !draft.day &&
-      !draft.estimate;
-    form.append(actions);
-
-    const chosenTags = el("div", "chosen-tags");
-    function renderChosenTags() {
-      chosenTags.replaceChildren();
-      for (const tagId of draft.tagIds) {
-        const tag = state.tags.find((item) => item.id === tagId);
-        if (!tag) continue;
-        const remove = control(`${tag.title} ×`, () => {
-          draft.tagIds = draft.tagIds.filter((id) => id !== tagId);
-          renderChosenTags();
-          if (!suggestions.hidden && !tagSearch.hidden) {
-            showSuggestions(tagSearch.value, "tag");
-          }
-        }, "chosen-tag");
-        remove.setAttribute("aria-label", `Remove tag ${tag.title}`);
-        chosenTags.append(remove);
-      }
-    }
-    renderChosenTags();
-    form.append(chosenTags);
-
-    const tagSearch = el("input", "tag-search");
-    tagSearch.type = "search";
-    tagSearch.value = "";
-    tagSearch.placeholder = "Search existing tags";
-    tagSearch.setAttribute("aria-label", "Search existing tags");
-    tagSearch.hidden = true;
-    form.append(tagSearch);
-
     let activeToken = null;
     let candidates = [];
     let selectedIndex = 0;
     function hideSuggestions() {
       suggestions.hidden = true;
       input.setAttribute("aria-expanded", "false");
+      input.removeAttribute("aria-activedescendant");
       activeToken = null;
     }
-    function removeActiveToken() {
-      if (activeToken) {
-        const left = input.value.slice(0, activeToken.start).trimEnd();
-        const right = input.value.slice(activeToken.end).trimStart();
-        input.value = [left, right].filter(Boolean).join(" ");
-        draft.title = input.value;
-        input.focus();
-        input.setSelectionRange(left.length, left.length);
-      }
-    }
     function chooseSuggestion(candidate) {
-      if (candidate.tag) {
-        if (draft.tagIds.includes(candidate.tag.id)) return;
-        draft.tagIds.push(candidate.tag.id);
-        renderChosenTags();
-      } else {
-        const value = BoardCore.resolveDateSuggestion(candidate.label);
-        draft.day = dayInput.value = value.day;
-        draft.time = timeInput.value = value.time;
-        dateFields.hidden = false;
-      }
-      removeActiveToken();
+      if (!activeToken) return;
+      const { start, end, kind } = activeToken;
+      const syntax = kind === "tag"
+        ? `#${/\s/.test(candidate) ? `"${candidate}"` : candidate}`
+        : kind === "date"
+        ? `@${candidate}`
+        : candidate;
+      input.value = input.value.slice(0, start) + syntax +
+        input.value.slice(end);
+      state.drafts.set(key, input.value);
       hideSuggestions();
-      tagSearch.hidden = true;
-      tagSearch.value = "";
+      input.focus();
+      input.setSelectionRange(start + syntax.length, start + syntax.length);
     }
-    function showSuggestions(query, kind) {
+    function updateSuggestions() {
+      const caret = input.selectionStart ?? input.value.length;
+      const prefix = input.value.slice(0, caret);
+      const trigger = /(^|\s)([#@])([^#@]*)$/.exec(prefix);
+      let kind, query, start;
+      if (
+        trigger &&
+        (trigger[2] === "@" || !/\s/.test(trigger[3].replace(/^"/, "")))
+      ) {
+        kind = trigger[2] === "@" ? "date" : "tag";
+        query = trigger[3].replace(/^"/, "");
+        start = caret - trigger[3].length - 1;
+      }
       if (kind === "date") {
-        candidates = BoardCore.dateSuggestions(query).map((label) => ({
-          label,
-        }));
+        // Once a complete @ date is followed by space, the next token can be
+        // a title word or an estimate; don't keep showing date suggestions.
+        for (const match of query.matchAll(/\s+/g)) {
+          const date = query.slice(0, match.index).toLowerCase();
+          if (BoardCore.dateSuggestions(date).includes(date)) {
+            kind = null;
+            break;
+          }
+        }
+      }
+      if (!kind) {
+        const duration = /(^|\s)(\d+(?:[.,]\d+)?\s*[hm](?:\s*\d*\s*m)?)$/i.exec(
+          prefix,
+        );
+        if (duration) {
+          kind = "estimate";
+          query = duration[2];
+          start = caret - duration[2].length;
+        }
+      }
+      if (!kind) {
+        hideSuggestions();
+        return;
+      }
+      activeToken = { start, end: caret, kind };
+      if (kind === "date") candidates = BoardCore.dateSuggestions(query);
+      else if (kind === "estimate") {
+        candidates = BoardCore.estimateSuggestions(query);
       } else {
         const laneTagIds = new Set(
           state.config.lanes.map((item) => item.tagId),
         );
         candidates = state.tags.filter((tag) =>
           tag.id !== "TODAY" && !laneTagIds.has(tag.id) &&
-          !draft.tagIds.includes(tag.id) &&
           tag.title?.toLowerCase().includes(query.toLowerCase())
-        ).slice(0, 10).map((tag) => ({ label: tag.title, tag }));
+        ).slice(0, 10).map((tag) => tag.title);
+      }
+      if (!candidates.length && kind === "estimate") {
+        hideSuggestions();
+        return;
       }
       selectedIndex = 0;
       suggestions.replaceChildren();
       for (const [index, candidate] of candidates.entries()) {
         const option = control(
-          candidate.label,
+          candidate,
           () => chooseSuggestion(candidate),
           "suggestion-option",
         );
         option.setAttribute("role", "option");
         option.setAttribute("aria-selected", String(index === selectedIndex));
+        option.id = `${suggestions.id}-${index}`;
         suggestions.append(option);
       }
+      if (candidates.length) {
+        input.setAttribute("aria-activedescendant", suggestions.children[0].id);
+      } else input.removeAttribute("aria-activedescendant");
       if (!candidates.length) {
         suggestions.append(
           el(
             "span",
             "muted",
             kind === "date"
-              ? "No matching dates. Use Schedule for a custom date and time."
+              ? "Try @today, @tomorrow or @YYYY-MM-DD."
               : "No matching tags. Lane tags come from the column.",
           ),
         );
@@ -393,7 +362,6 @@
       if (suggestions.hidden) return false;
       if (event.key === "Escape") {
         event.preventDefault();
-        tagSearch.hidden = true;
         hideSuggestions();
         return true;
       }
@@ -405,6 +373,10 @@
         Array.from(suggestions.children).forEach((node, i) =>
           node.setAttribute("aria-selected", String(i === selectedIndex))
         );
+        input.setAttribute(
+          "aria-activedescendant",
+          suggestions.children[selectedIndex].id,
+        );
         return true;
       }
       if (event.key === "Enter") {
@@ -414,116 +386,32 @@
       }
       return false;
     }
-    input.addEventListener("focus", () => {
-      actions.hidden = false;
-    });
     input.addEventListener("input", () => {
-      draft.title = input.value;
-      actions.hidden = false;
-      const caret = input.selectionStart ?? input.value.length;
-      const match = /(^|\s)([#@])([^#@]*)$/.exec(input.value.slice(0, caret));
-      if (!match || (match[2] === "#" && /\s/.test(match[3]))) {
-        hideSuggestions();
-        return;
-      }
-      const kind = match[2] === "@" ? "date" : "tag";
-      activeToken = { start: caret - match[3].length - 1, end: caret, kind };
-      showSuggestions(match[3], kind);
+      state.drafts.set(key, input.value);
+      updateSuggestions();
     });
     input.addEventListener("keydown", (event) => {
       if (activeToken) navigateSuggestions(event);
     });
-    tagSearch.addEventListener(
-      "input",
-      () => showSuggestions(tagSearch.value, "tag"),
-    );
-    tagSearch.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") event.preventDefault();
-      if (navigateSuggestions(event) && event.key === "Escape") input.focus();
+    input.addEventListener("keyup", (event) => {
+      if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+        updateSuggestions();
+      }
     });
-
-    const dateFields = el("div", "add-fields");
-    dateFields.hidden = !draft.day && !draft.time;
-    const dayInput = el("input");
-    dayInput.type = "date";
-    dayInput.value = draft.day;
-    dayInput.setAttribute("aria-label", "Scheduled date");
-    dayInput.addEventListener("change", () => {
-      draft.day = dayInput.value;
-    });
-    const timeInput = el("input");
-    timeInput.type = "time";
-    timeInput.value = draft.time;
-    timeInput.setAttribute("aria-label", "Scheduled time (optional)");
-    timeInput.addEventListener("change", () => {
-      draft.time = timeInput.value;
-    });
-    for (const [label, offset] of [["Today", 0], ["Tomorrow", 1]]) {
-      dateFields.append(control(label, () => {
-        const next = new Date();
-        next.setDate(next.getDate() + offset);
-        dayInput.value = `${next.getFullYear()}-${
-          String(next.getMonth() + 1).padStart(2, "0")
-        }-${String(next.getDate()).padStart(2, "0")}`;
-        draft.day = dayInput.value;
-      }));
-    }
-    const clearDate = control("Clear", () => {
-      dayInput.value = "";
-      timeInput.value = "";
-      draft.day = "";
-      draft.time = "";
-    });
-    clearDate.setAttribute("aria-label", "Clear scheduled date and time");
-    dateFields.append(dayInput, timeInput, clearDate);
-    form.append(dateFields);
-
-    const estimateFields = el("div", "add-fields");
-    estimateFields.hidden = !draft.estimate;
-    const estimateInput = el("input");
-    estimateInput.type = "text";
-    estimateInput.value = draft.estimate;
-    estimateInput.placeholder = "e.g. 1h 30m";
-    estimateInput.setAttribute("aria-label", "Time estimate");
-    estimateInput.addEventListener("input", () => {
-      draft.estimate = estimateInput.value;
-    });
-    for (const value of ["15m", "30m", "1h", "2h"]) {
-      estimateFields.append(control(value, () => {
-        estimateInput.value = draft.estimate = value;
-      }));
-    }
-    const clearEstimate = control("Clear", () => {
-      estimateInput.value = draft.estimate = "";
-    });
-    clearEstimate.setAttribute("aria-label", "Clear estimate");
-    estimateFields.append(estimateInput, clearEstimate);
-    form.append(estimateFields);
+    input.addEventListener("click", updateSuggestions);
 
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      if (activeToken?.kind === "date" && !suggestions.hidden) {
-        const typed = input.value.slice(activeToken.start + 1, activeToken.end)
-          .trim();
-        const exact = candidates.find((candidate) =>
-          candidate.label.toLowerCase() === typed.toLowerCase()
-        );
-        if (exact) chooseSuggestion(exact);
-      }
-      const title = draft.title.trim();
-      if (!title || !state.ctx) return;
-      if (/(^|\s)@/.test(title)) {
-        status(
-          "Select an @ date suggestion or use Schedule. Other @ expressions are not supported here.",
-          true,
-        );
-        return;
-      }
+      if (!state.ctx) return;
       const projectId = state.ctx.id;
-      let schedule, timeEstimate;
+      let parsed;
       try {
-        schedule = BoardCore.parseSchedule(draft.day, draft.time);
-        timeEstimate = BoardCore.parseEstimate(draft.estimate);
+        parsed = BoardCore.parseQuickAdd(
+          input.value,
+          state.tags,
+          state.config,
+          laneId,
+        );
       } catch (error) {
         status(error.message, true);
         return;
@@ -536,17 +424,17 @@
           state.template,
         );
         const taskId = await api.addTask({
-          title,
+          title: parsed.title,
           ...fields,
-          tagIds: [...fields.tagIds, ...draft.tagIds],
-          ...(schedule.dueDay ? { dueDay: schedule.dueDay } : {}),
-          ...(timeEstimate ? { timeEstimate } : {}),
+          tagIds: [...fields.tagIds, ...parsed.tagIds],
+          ...(parsed.schedule.dueDay ? { dueDay: parsed.schedule.dueDay } : {}),
+          ...(parsed.timeEstimate ? { timeEstimate: parsed.timeEstimate } : {}),
         });
-        if (schedule.dueWithTime) {
+        if (parsed.schedule.dueWithTime) {
           try {
             // PluginCreateTaskData supports all-day dates; timed dates require an update.
             await api.updateTask(taskId, {
-              dueWithTime: schedule.dueWithTime,
+              dueWithTime: parsed.schedule.dueWithTime,
               dueDay: null,
             });
           } catch {

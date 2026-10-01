@@ -2,7 +2,7 @@
 
 An opt-in Kanban view **inside each project** in [Super Productivity](https://github.com/super-productivity/super-productivity). It is a separate plugin view, not a replacement for the app's Boards feature. Lanes are backed by tags; tasks stay scoped to their project.
 
-> Early release: test new features on a disposable project before using important task data. Inline creation and `@` suggestions still need hands-on testing in Super Productivity.
+> Early release: test new features on a disposable project before using important task data. The keyboard-first task entry still needs hands-on testing in Super Productivity.
 
 ## Install
 
@@ -29,7 +29,13 @@ In **Configure lanes**, add or create tags, give lanes local display names, reor
 
 Drag cards between lanes, or above/below another card to reorder tasks inside a lane. This order is stored by the plugin per project and template; it does not reorder the native task list. The **⋯** menu offers a Move to selector for keyboard/touch use (and Complete in Workflow). Click a card title to open native task details. When present, a right-aligned calendar/date (or clock/time for today) and time estimate follow the app's Boards card style; hover the schedule for its full date and time. Subtasks appear, but must be moved from their parent/native details.
 
-**Add tasks in a lane:** Type a title and use the inline **Schedule**, **# Tags**, and **Estimate** controls. Typing `#` in the title suggests existing tags; typing `@` suggests common scheduled dates and times. Use ↑/↓ and Enter (or click) to select a suggestion. The token is removed from the title and the selection appears in the form. Supported `@` examples: `@today`, `@tomorrow`, `@next week`, `@monday`, `@in 1 hour`, `@at 9am`, and an exact `@YYYY-MM-DD` date. An exact suggestion such as `@today` also applies when you click Add; unsupported `@` expressions are rejected instead of silently becoming part of the title. The Schedule control offers Today/Tomorrow or any date and optional time; Estimate offers presets or values such as `45m` and `1h 30m`. The task always belongs to the active project and its chosen lane. Other configured lane tags are omitted from the tag suggestions so one task cannot be assigned to two lanes. The full native natural-language parser, repeat rules (including `@every ...`), and creating new tags from the inline form are not available inside the plugin iframe.
+**Add tasks in a lane:** Use the single input and press Enter. Shortcuts remain visible and editable in the input until you submit:
+
+- `#` suggests existing non-lane tags: `Write report #Extra`. Select with ↑/↓ and Enter, or type the exact name. Tags with spaces are inserted as `#"Focus Time"`.
+- `@` suggests common dates/times: `Review @tomorrow`, `Follow up @in 1 hour`, `Meet @2026-10-22 14:30`. Supported suggestions include today, tomorrow, next week, weekdays, tonight, and a few relative/clock times. Exact `@YYYY-MM-DD` dates work without selecting a suggestion.
+- Type an estimate with a unit: `Write report 45m` or `Write report 1h 30m`. Duration suggestions appear after typing a unit; choose with ↑/↓ and Enter. Custom durations with `h`/`m` work without selecting a preset.
+
+Enter accepts a visible suggestion; press Enter again to create the task. Escape closes suggestions. You can also submit using the Add button. The shortcuts are stripped from the created title, while the task stays in the active project and the lane where it was entered. Unsupported `@` expressions and unknown `#` tags show an error rather than silently creating the wrong task. The full native natural-language parser, repeat rules (including `@every ...`), and creating new tags from this form are not available inside the plugin iframe.
 
 ## Build from source
 
@@ -42,7 +48,7 @@ deno test --allow-read tests/
 python3 build.py
 ```
 
-Install `dist/project-kanban.zip` using the instructions above. The ZIP contains `manifest.json`, `plugin.js`, and a self-contained `index.html` at its root. The [CI workflow](.github/workflows/release.yml) runs these checks on pushes and pull requests, uploads a short-lived build artifact, and publishes the ZIP as a GitHub Release when a version tag such as `v0.3.1` is pushed. Tags must match `src/manifest.json`'s version.
+Install `dist/project-kanban.zip` using the instructions above. The ZIP contains `manifest.json`, `plugin.js`, and a self-contained `index.html` at its root. The [CI workflow](.github/workflows/release.yml) runs these checks on pushes and pull requests, uploads a short-lived build artifact, and publishes the ZIP as a GitHub Release when a version tag such as `v0.4.0` is pushed. Tags must match `src/manifest.json`'s version.
 
 ## Verify on a disposable project
 
@@ -51,8 +57,8 @@ Install `dist/project-kanban.zip` using the instructions above. The ZIP contains
 3. Create another lane from a tag, rename its **local label**, reorder it, and remove it. Check tasks remain visible in the fallback lane and the global tag name remains unchanged. Try dragging two tasks within a lane and reopening the board to verify their order.
 4. Check a project with backlog items and subtasks; both are identified, and the native task detail still opens.
 5. Set an all-day schedule, a timed schedule, and a time estimate in native task details; check the board indicators and updates after editing the task.
-6. In a lane's add form, type `#` to select an unrelated tag, choose an all-day or timed schedule and an estimate, and create a task. Check the title has no `#` token, the task stays in this project/lane, and native details show the chosen fields. Try a time without a date; it must refuse creation.
-7. Type `@tom` and select tomorrow, then try `@in 1` and select an hour from now. Check both tokens disappear from the title and the chosen dates/times appear in native task details.
+6. In a lane's single input, type `Write report #Extra @2026-10-22 14:30 1h 30m` (with an existing unrelated tag), then submit. Check that the title is `Write report`, the task stays in this project/lane, and native details show the tag, timed schedule, and estimate.
+7. Type `@tom` and select tomorrow with Enter, then press Enter again to add the task. Try `@in 1` for a timed suggestion. Verify typing `@every friday` or an unknown `#` tag fails visibly rather than creating a task.
 
 ## Limits
 

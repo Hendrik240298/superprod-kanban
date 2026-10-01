@@ -27,6 +27,114 @@ const BoardCore = (() => {
     "at 9am",
     "at 3pm",
   ];
+  const ESTIMATE_SUGGESTIONS = [
+    "5m",
+    "10m",
+    "15m",
+    "30m",
+    "45m",
+    "1h",
+    "1h 30m",
+    "2h",
+    "3h",
+    "4h",
+    "8h",
+  ];
+
+  function estimateSuggestions(query) {
+    const text = query.toLowerCase().replace(/\s+/g, "");
+    return ESTIMATE_SUGGESTIONS.filter((label) =>
+      label.replace(/\s+/g, "").startsWith(text)
+    ).slice(0, 10);
+  }
+
+  function parseQuickAdd(raw, tags, config, laneId, now = new Date()) {
+    const ranges = [];
+    const tagIds = [];
+    const laneTags = new Set(config.lanes.map((lane) => lane.tagId));
+    for (const match of raw.matchAll(/(^|\s)#(?:"([^"]+)"|([^\s#@]+))/g)) {
+      const start = match.index + match[1].length;
+      const name = match[2] || match[3];
+      const tag = tags.find((item) =>
+        item.title?.toLowerCase() === name.toLowerCase()
+      );
+      if (!tag || tag.id === "TODAY") {
+        throw new Error(
+          `Unknown tag #${name}. Select an existing tag from the suggestions.`,
+        );
+      }
+      if (laneTags.has(tag.id) && tag.id !== laneId) {
+        throw new Error(
+          "That tag is another lane. Add the task in its lane instead.",
+        );
+      }
+      if (!laneTags.has(tag.id) && !tagIds.includes(tag.id)) {
+        tagIds.push(tag.id);
+      }
+      ranges.push({ start, end: start + match[0].length - match[1].length });
+    }
+    const withoutTags = stripRanges(raw, ranges);
+    if (/(^|\s)#/.test(withoutTags)) {
+      throw new Error("Choose an existing # tag suggestion.");
+    }
+
+    const dateRanges = [];
+    let schedule = {};
+    const options = [...DATE_SUGGESTIONS].sort((a, b) => b.length - a.length);
+    for (const match of withoutTags.matchAll(/(^|\s)@/g)) {
+      if (dateRanges.length) throw new Error("Choose only one scheduled date.");
+      const start = match.index + match[1].length;
+      const remainder = withoutTags.slice(start + 1);
+      const iso = /^(\d{4}-\d{2}-\d{2})(?=\s|[.,;!?]|$)/.exec(remainder);
+      const label = iso?.[1] ||
+        options.find((item) =>
+          remainder.toLowerCase().startsWith(item) &&
+          /^(?:\s|[.,;!?]|$)/.test(remainder.slice(item.length))
+        );
+      if (!label) {
+        throw new Error("Choose an @ date suggestion or type @YYYY-MM-DD.");
+      }
+      const resolved = resolveDateSuggestion(label, now);
+      let end = start + 1 + label.length;
+      const clock = /^\s+(\d{1,2}):(\d{2})(?=\s|[.,;!?]|$)/.exec(
+        withoutTags.slice(end),
+      );
+      if (clock) {
+        if (resolved.time) {
+          throw new Error("This @ suggestion already has a time.");
+        }
+        resolved.time = `${clock[1].padStart(2, "0")}:${clock[2]}`;
+        end += clock[0].length;
+      }
+      schedule = parseSchedule(resolved.day, resolved.time);
+      dateRanges.push({ start, end });
+    }
+    const withoutDates = stripRanges(withoutTags, dateRanges);
+    const estimateRanges = [];
+    let timeEstimate = null;
+    for (
+      const match of withoutDates.matchAll(
+        /(^|\s)(\d+(?:[.,]\d+)?\s*h(?:\s*\d+\s*m)?|\d+\s*m)(?=\s|$)/gi,
+      )
+    ) {
+      if (estimateRanges.length) {
+        throw new Error("Choose only one time estimate.");
+      }
+      const start = match.index + match[1].length;
+      timeEstimate = parseEstimate(match[2]);
+      estimateRanges.push({ start, end: start + match[2].length });
+    }
+    const title = stripRanges(withoutDates, estimateRanges).trim();
+    if (!title) throw new Error("Enter a task title as well as its shortcuts.");
+    return { title, tagIds, schedule, timeEstimate };
+  }
+
+  function stripRanges(text, ranges) {
+    for (const { start, end } of ranges.sort((a, b) => b.start - a.start)) {
+      text = text.slice(0, start) + text.slice(end);
+    }
+    return text.replace(/\s{2,}/g, " ").replace(/\s+([,.;!?])/g, "$1").trim();
+  }
 
   function dateSuggestions(query) {
     const text = query.trim().toLowerCase();
@@ -281,6 +389,8 @@ const BoardCore = (() => {
     WORKFLOW_TAGS,
     dateSuggestions,
     resolveDateSuggestion,
+    estimateSuggestions,
+    parseQuickAdd,
     estimateLabel,
     scheduledDate,
     parseEstimate,
