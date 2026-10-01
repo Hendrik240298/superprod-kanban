@@ -257,13 +257,15 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   titleInput.fire("input");
   const extraOption = descendants(
     firstForm,
-    (node) => node.className === "tag-option" && node.textContent === "Extra",
+    (node) =>
+      node.className === "suggestion-option" && node.textContent === "Extra",
   )[0];
   if (
     !extraOption ||
     descendants(
       firstForm,
-      (node) => node.className === "tag-option" && node.textContent === "Doing",
+      (node) =>
+        node.className === "suggestion-option" && node.textContent === "Doing",
     ).length
   ) {
     throw new Error("# autocomplete did not suggest the matching non-lane tag");
@@ -401,6 +403,118 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
     !added[2].tagIds.includes("extra")
   ) {
     throw new Error("Tag search or estimate preset was not applied");
+  }
+  const dateForm = descendants(
+    app,
+    (node) => node.tag === "form" && node.className === "add-row",
+  )[0];
+  const dateTitle = descendants(
+    dateForm,
+    (node) => node.attributes["aria-label"] === "New task in Clarify",
+  )[0];
+  dateTitle.value = "Review @tom";
+  dateTitle.selectionStart = dateTitle.value.length;
+  dateTitle.fire("input");
+  const tomorrow = descendants(
+    dateForm,
+    (node) =>
+      node.className === "suggestion-option" &&
+      node.textContent === "tomorrow",
+  )[0];
+  if (!tomorrow) throw new Error("@tom did not suggest tomorrow");
+  dateTitle.fire("keydown", { key: "Enter", preventDefault() {} });
+  const expectedTomorrow = BoardCore.resolveDateSuggestion("tomorrow").day;
+  if (
+    dateTitle.value !== "Review" ||
+    descendants(dateForm, (node) => node.type === "date")[0].value !==
+      expectedTomorrow
+  ) {
+    throw new Error(
+      "Selecting @tomorrow did not strip the token and set the date",
+    );
+  }
+  dateForm.fire("submit", { preventDefault() {} });
+  await flush();
+  if (
+    added.length !== 4 || added[3].title !== "Review" ||
+    added[3].dueDay !== expectedTomorrow
+  ) {
+    throw new Error("@tomorrow did not persist an all-day schedule");
+  }
+  const timeForm = descendants(
+    app,
+    (node) => node.tag === "form" && node.className === "add-row",
+  )[0];
+  const timeTitle = descendants(
+    timeForm,
+    (node) => node.attributes["aria-label"] === "New task in Clarify",
+  )[0];
+  timeTitle.value = "Follow up @in 1";
+  timeTitle.selectionStart = timeTitle.value.length;
+  timeTitle.fire("input");
+  const hour = descendants(
+    timeForm,
+    (node) =>
+      node.className === "suggestion-option" &&
+      node.textContent === "in 1 hour",
+  )[0];
+  if (!hour) throw new Error("@in 1 did not suggest a timed schedule");
+  hour.fire("click");
+  if (
+    timeTitle.value !== "Follow up" ||
+    !descendants(timeForm, (node) => node.type === "time")[0].value
+  ) {
+    throw new Error("Selecting a timed @ suggestion did not set the time");
+  }
+  timeForm.fire("submit", { preventDefault() {} });
+  await flush();
+  if (
+    added.length !== 5 || "dueDay" in added[4] ||
+    !updates.some(({ id, patch }) =>
+      id === "new-5" &&
+      Math.abs(patch.dueWithTime - (Date.now() + 3600000)) < 60000
+    )
+  ) {
+    throw new Error("Timed @ suggestion did not persist a timed schedule");
+  }
+  const exactForm = descendants(
+    app,
+    (node) => node.tag === "form" && node.className === "add-row",
+  )[0];
+  const exactTitle = descendants(
+    exactForm,
+    (node) => node.attributes["aria-label"] === "New task in Clarify",
+  )[0];
+  exactTitle.value = "Write @today";
+  exactTitle.selectionStart = exactTitle.value.length;
+  exactTitle.fire("input");
+  exactForm.fire("submit", { preventDefault() {} });
+  await flush();
+  if (
+    added.length !== 6 || added[5].title !== "Write" ||
+    added[5].dueDay !== BoardCore.resolveDateSuggestion("today").day
+  ) {
+    throw new Error("Submitting an exact @ date did not apply it");
+  }
+  const unsupportedForm = descendants(
+    app,
+    (node) => node.tag === "form" && node.className === "add-row",
+  )[0];
+  const unsupportedTitle = descendants(
+    unsupportedForm,
+    (node) => node.attributes["aria-label"] === "New task in Clarify",
+  )[0];
+  unsupportedTitle.value = "Repeat @every friday";
+  unsupportedTitle.selectionStart = unsupportedTitle.value.length;
+  unsupportedTitle.fire("input");
+  unsupportedForm.fire("submit", { preventDefault() {} });
+  if (
+    added.length !== 6 ||
+    !errors.some((text) =>
+      text.includes("Other @ expressions are not supported")
+    )
+  ) {
+    throw new Error("Unsupported @ text was silently created as a task");
   }
   if (!hooks.has("anyTaskUpdate")) throw new Error("Task refresh hook missing");
 });

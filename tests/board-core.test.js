@@ -63,6 +63,43 @@ Deno.test("inline creation parses estimates and all-day or timed schedules", () 
   }
 });
 
+Deno.test("@ suggestions resolve common dates and times without guessing other text", () => {
+  const now = new Date(2026, 9, 1, 10, 30);
+  equal(BoardCore.dateSuggestions("tom"), ["tomorrow"]);
+  equal(BoardCore.dateSuggestions("next w"), ["next week"]);
+  equal(BoardCore.dateSuggestions("in 1"), ["in 1 hour"]);
+  equal(BoardCore.dateSuggestions("2026-10-22"), ["2026-10-22"]);
+  equal(BoardCore.dateSuggestions("2026-02-30"), []);
+  equal(BoardCore.resolveDateSuggestion("today", now), {
+    day: "2026-10-01",
+    time: "",
+  });
+  equal(BoardCore.resolveDateSuggestion("tomorrow", now), {
+    day: "2026-10-02",
+    time: "",
+  });
+  equal(BoardCore.resolveDateSuggestion("next week", now), {
+    day: "2026-10-05",
+    time: "",
+  });
+  equal(BoardCore.resolveDateSuggestion("monday", now), {
+    day: "2026-10-05",
+    time: "",
+  });
+  equal(BoardCore.resolveDateSuggestion("in 1 hour", now), {
+    day: "2026-10-01",
+    time: "11:30",
+  });
+  equal(BoardCore.resolveDateSuggestion("at 9am", now), {
+    day: "2026-10-02",
+    time: "09:00",
+  });
+  equal(BoardCore.resolveDateSuggestion("2026-10-22", now), {
+    day: "2026-10-22",
+    time: "",
+  });
+});
+
 Deno.test("columns use tag names, local aliases and the two special lanes", () => {
   equal(BoardCore.columns(config, tags).map(({ label }) => label), [
     "To Do",

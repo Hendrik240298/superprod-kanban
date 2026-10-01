@@ -1,6 +1,6 @@
 # Project Kanban: design and implementation plan
 
-Status: the tag-based plugin is implemented in `src/`; screenshots confirm the board renders, and the user verified task creation and cross-lane dragging in the running app. The user has used the board at work and likes it. Version 0.3.0 adds plugin-local inline tag suggestions, date/time scheduling and estimate controls; these additions and cross-project/restart persistence still need manual verification. This plan expands [IDEA.md](IDEA.md).
+Status: the tag-based plugin is implemented in `src/`; screenshots confirm the board renders, and the user verified task creation and cross-lane dragging in the running app. The user has used the board at work and likes it. Version 0.3.1 adds limited `@` date/time suggestions alongside plugin-local inline tag suggestions, scheduling and estimate controls; these additions and cross-project/restart persistence still need manual verification. This plan expands [IDEA.md](IDEA.md).
 
 ## Goal and scope
 

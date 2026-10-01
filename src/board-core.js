@@ -10,6 +10,77 @@ const BoardCore = (() => {
     "Scheduled",
     "Maybe/Later",
   ];
+  const DATE_SUGGESTIONS = [
+    "today",
+    "tomorrow",
+    "tonight",
+    "next week",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+    "in 1 hour",
+    "in 2 hours",
+    "at 9am",
+    "at 3pm",
+  ];
+
+  function dateSuggestions(query) {
+    const text = query.trim().toLowerCase();
+    const matches = DATE_SUGGESTIONS.filter((label) => label.includes(text));
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+      try {
+        parseSchedule(text, "");
+        matches.unshift(text);
+      } catch { /* Invalid dates are not suggestions. */ }
+    }
+    return matches.slice(0, 10);
+  }
+
+  function resolveDateSuggestion(label, now = new Date()) {
+    const next = new Date(now);
+    let time = "";
+    if (label === "today") {
+      // Use the current calendar date.
+    } else if (label === "tomorrow") {
+      next.setDate(next.getDate() + 1);
+    } else if (label === "next week") {
+      next.setDate(next.getDate() + ((8 - next.getDay()) % 7 || 7));
+    } else if (
+      label === "tonight" || label === "at 9am" || label === "at 3pm"
+    ) {
+      const hour = label === "tonight" ? 20 : label === "at 9am" ? 9 : 15;
+      next.setHours(hour, 0, 0, 0);
+      if (next <= now) next.setDate(next.getDate() + 1);
+      time = `${String(hour).padStart(2, "0")}:00`;
+    } else if (label === "in 1 hour" || label === "in 2 hours") {
+      next.setTime(next.getTime() + (label === "in 1 hour" ? 1 : 2) * 3600000);
+      time = `${String(next.getHours()).padStart(2, "0")}:${
+        String(next.getMinutes()).padStart(2, "0")
+      }`;
+    } else if (DATE_SUGGESTIONS.includes(label)) {
+      const weekday = [
+        "sunday",
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+      ].indexOf(label);
+      next.setDate(next.getDate() + (weekday - next.getDay() + 7) % 7);
+    } else {
+      parseSchedule(label, "");
+      return { day: label, time: "" };
+    }
+    const day = `${next.getFullYear()}-${
+      String(next.getMonth() + 1).padStart(2, "0")
+    }-${String(next.getDate()).padStart(2, "0")}`;
+    return { day, time };
+  }
 
   function estimateLabel(ms) {
     if (!Number.isFinite(ms) || ms <= 0) return null;
@@ -208,6 +279,8 @@ const BoardCore = (() => {
 
   return {
     WORKFLOW_TAGS,
+    dateSuggestions,
+    resolveDateSuggestion,
     estimateLabel,
     scheduledDate,
     parseEstimate,

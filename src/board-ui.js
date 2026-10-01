@@ -248,8 +248,8 @@
     main.append(input, add);
     form.append(main);
 
-    const suggestions = el("div", "tag-suggestions");
-    suggestions.id = `tags-${laneId}`;
+    const suggestions = el("div", "input-suggestions");
+    suggestions.id = `suggestions-${laneId}`;
     suggestions.setAttribute("role", "listbox");
     suggestions.hidden = true;
     input.setAttribute("aria-autocomplete", "list");
@@ -265,13 +265,14 @@
       if (!dateFields.hidden) dayInput.focus();
     });
     const tagButton = control("# Tags", () => {
-      tagSearch.value = activeToken
+      tagSearch.value = activeToken?.kind === "tag"
         ? input.value.slice(activeToken.start + 1, activeToken.end)
         : "";
+      if (activeToken?.kind === "date") hideSuggestions();
       tagSearch.hidden = !tagSearch.hidden;
       if (!tagSearch.hidden) {
         tagSearch.focus();
-        showSuggestions(tagSearch.value);
+        showSuggestions(tagSearch.value, "tag");
       } else hideSuggestions();
     });
     const estimateButton = control("Estimate", () => {
@@ -294,7 +295,9 @@
         const remove = control(`${tag.title} ×`, () => {
           draft.tagIds = draft.tagIds.filter((id) => id !== tagId);
           renderChosenTags();
-          if (!suggestions.hidden) showSuggestions(tagSearch.value);
+          if (!suggestions.hidden && !tagSearch.hidden) {
+            showSuggestions(tagSearch.value, "tag");
+          }
         }, "chosen-tag");
         remove.setAttribute("aria-label", `Remove tag ${tag.title}`);
         chosenTags.append(remove);
@@ -319,9 +322,7 @@
       input.setAttribute("aria-expanded", "false");
       activeToken = null;
     }
-    function chooseTag(tag) {
-      if (!tag || draft.tagIds.includes(tag.id)) return;
-      draft.tagIds.push(tag.id);
+    function removeActiveToken() {
       if (activeToken) {
         const left = input.value.slice(0, activeToken.start).trimEnd();
         const right = input.value.slice(activeToken.end).trimStart();
@@ -330,22 +331,46 @@
         input.focus();
         input.setSelectionRange(left.length, left.length);
       }
-      renderChosenTags();
+    }
+    function chooseSuggestion(candidate) {
+      if (candidate.tag) {
+        if (draft.tagIds.includes(candidate.tag.id)) return;
+        draft.tagIds.push(candidate.tag.id);
+        renderChosenTags();
+      } else {
+        const value = BoardCore.resolveDateSuggestion(candidate.label);
+        draft.day = dayInput.value = value.day;
+        draft.time = timeInput.value = value.time;
+        dateFields.hidden = false;
+      }
+      removeActiveToken();
       hideSuggestions();
       tagSearch.hidden = true;
       tagSearch.value = "";
     }
-    function showSuggestions(query) {
-      const laneTagIds = new Set(state.config.lanes.map((item) => item.tagId));
-      candidates = state.tags.filter((tag) =>
-        tag.id !== "TODAY" && !laneTagIds.has(tag.id) &&
-        !draft.tagIds.includes(tag.id) &&
-        tag.title?.toLowerCase().includes(query.toLowerCase())
-      ).slice(0, 10);
+    function showSuggestions(query, kind) {
+      if (kind === "date") {
+        candidates = BoardCore.dateSuggestions(query).map((label) => ({
+          label,
+        }));
+      } else {
+        const laneTagIds = new Set(
+          state.config.lanes.map((item) => item.tagId),
+        );
+        candidates = state.tags.filter((tag) =>
+          tag.id !== "TODAY" && !laneTagIds.has(tag.id) &&
+          !draft.tagIds.includes(tag.id) &&
+          tag.title?.toLowerCase().includes(query.toLowerCase())
+        ).slice(0, 10).map((tag) => ({ label: tag.title, tag }));
+      }
       selectedIndex = 0;
       suggestions.replaceChildren();
-      for (const [index, tag] of candidates.entries()) {
-        const option = control(tag.title, () => chooseTag(tag), "tag-option");
+      for (const [index, candidate] of candidates.entries()) {
+        const option = control(
+          candidate.label,
+          () => chooseSuggestion(candidate),
+          "suggestion-option",
+        );
         option.setAttribute("role", "option");
         option.setAttribute("aria-selected", String(index === selectedIndex));
         suggestions.append(option);
@@ -355,7 +380,9 @@
           el(
             "span",
             "muted",
-            "No matching tags. Lane tags come from the column.",
+            kind === "date"
+              ? "No matching dates. Use Schedule for a custom date and time."
+              : "No matching tags. Lane tags come from the column.",
           ),
         );
       }
@@ -382,7 +409,7 @@
       }
       if (event.key === "Enter") {
         event.preventDefault();
-        chooseTag(candidates[selectedIndex]);
+        chooseSuggestion(candidates[selectedIndex]);
         return true;
       }
       return false;
@@ -394,18 +421,22 @@
       draft.title = input.value;
       actions.hidden = false;
       const caret = input.selectionStart ?? input.value.length;
-      const match = /(^|\s)#([^\s#]*)$/.exec(input.value.slice(0, caret));
-      if (!match) {
+      const match = /(^|\s)([#@])([^#@]*)$/.exec(input.value.slice(0, caret));
+      if (!match || (match[2] === "#" && /\s/.test(match[3]))) {
         hideSuggestions();
         return;
       }
-      activeToken = { start: caret - match[2].length - 1, end: caret };
-      showSuggestions(match[2]);
+      const kind = match[2] === "@" ? "date" : "tag";
+      activeToken = { start: caret - match[3].length - 1, end: caret, kind };
+      showSuggestions(match[3], kind);
     });
     input.addEventListener("keydown", (event) => {
       if (activeToken) navigateSuggestions(event);
     });
-    tagSearch.addEventListener("input", () => showSuggestions(tagSearch.value));
+    tagSearch.addEventListener(
+      "input",
+      () => showSuggestions(tagSearch.value, "tag"),
+    );
     tagSearch.addEventListener("keydown", (event) => {
       if (event.key === "Enter") event.preventDefault();
       if (navigateSuggestions(event) && event.key === "Escape") input.focus();
@@ -471,8 +502,23 @@
 
     form.addEventListener("submit", (event) => {
       event.preventDefault();
+      if (activeToken?.kind === "date" && !suggestions.hidden) {
+        const typed = input.value.slice(activeToken.start + 1, activeToken.end)
+          .trim();
+        const exact = candidates.find((candidate) =>
+          candidate.label.toLowerCase() === typed.toLowerCase()
+        );
+        if (exact) chooseSuggestion(exact);
+      }
       const title = draft.title.trim();
       if (!title || !state.ctx) return;
+      if (/(^|\s)@/.test(title)) {
+        status(
+          "Select an @ date suggestion or use Schedule. Other @ expressions are not supported here.",
+          true,
+        );
+        return;
+      }
       const projectId = state.ctx.id;
       let schedule, timeEstimate;
       try {

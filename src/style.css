@@ -324,7 +324,7 @@ select:focus-visible,
 .chosen-tag {
   border-radius: 999px !important;
 }
-.tag-suggestions {
+.input-suggestions {
   max-height: 160px;
   overflow-y: auto;
   border: 1px solid var(--divider-color, #aaa5);
@@ -332,14 +332,14 @@ select:focus-visible,
   background: var(--card-bg, #fff);
   padding: 4px;
 }
-.tag-suggestions .tag-option {
+.input-suggestions .suggestion-option {
   display: block;
   width: 100%;
   border: 0;
   text-align: left;
 }
-.tag-option[aria-selected="true"],
-.tag-option:hover {
+.suggestion-option[aria-selected="true"],
+.suggestion-option:hover {
   background: var(--bg-darker, #efefef);
 }
 .empty {
