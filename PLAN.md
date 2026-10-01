@@ -1,6 +1,6 @@
 # Project Kanban: design and implementation plan
 
-Status: the tag-based plugin is implemented in `src/`; screenshots confirm the board renders, and the user verified task creation and cross-lane dragging in the running app. The user has used the board at work and likes it. Version 0.4.0 replaced the extra inline buttons and panels with one keyboard-first entry field for `#` tag, `@` date/time and duration shortcuts; v0.4.1 removes the redundant card menu in favor of native task details. These changes and cross-project/restart persistence still need manual verification. This plan expands [IDEA.md](IDEA.md).
+Status: the tag-based plugin is implemented in `src/`; screenshots confirm the board renders, and the user verified task creation and cross-lane dragging in the running app. The user has used the board at work and likes it. Version 0.4.0 replaced the extra inline buttons and panels with one keyboard-first entry field for `#` tag, `@` date/time and duration shortcuts; v0.4.1 removed the redundant card menu in favor of native task details. Version 0.4.2 adds a configurable host-side view shortcut with a matching board-local exit chord; native task-row shortcuts remain unavailable while the iframe has focus. These changes and cross-project/restart persistence still need manual verification. This plan expands [IDEA.md](IDEA.md).
 
 ## Goal and scope
 

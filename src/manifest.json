@@ -1,7 +1,7 @@
 {
   "id": "project-kanban",
   "name": "Project Kanban",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "A tag-based Kanban view inside each Super Productivity project.",
   "manifestVersion": 1,
   "minSupVersion": "18.7.0",
@@ -13,6 +13,7 @@
     "showInWorkContext",
     "closeWorkContextView",
     "registerWorkContextHeaderButton",
+    "registerShortcut",
     "registerHook",
     "getTasks",
     "getAllTags",

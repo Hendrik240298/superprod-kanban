@@ -61,8 +61,10 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   );
   const app = new Node("main");
   app.id = "app";
+  const documentListeners = new Map();
   const document = {
     createElement: (tag) => new Node(tag),
+    addEventListener: (key, fn) => documentListeners.set(key, fn),
     getElementById: (id) =>
       descendants(app, (node) => node.id === id)[0] || null,
   };
@@ -94,6 +96,7 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   const updates = [];
   const added = [];
   const selected = [];
+  const closed = [];
   const errors = [];
   const hooks = new Map();
   const api = {
@@ -133,6 +136,7 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
     selectTask: async (id) => {
       selected.push(id);
     },
+    closeWorkContextView: () => closed.push(true),
     log: { err: () => {} },
   };
   new Function("window", "document", "BoardCore", "console", source)(
@@ -434,4 +438,23 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
     throw new Error("Selected multiword tag did not persist");
   }
   if (!hooks.has("anyTaskUpdate")) throw new Error("Task refresh hook missing");
+  const boardKeydown = documentListeners.get("keydown");
+  if (!boardKeydown) throw new Error("Board exit shortcut missing");
+  const chord = (target) =>
+    boardKeydown({
+      key: "k",
+      ctrlKey: true,
+      altKey: true,
+      target,
+      preventDefault() {},
+    });
+  chord({ closest: () => ({ tag: "input" }) });
+  if (closed.length || values.has("view-p")) {
+    throw new Error("Board shortcut stole a key while typing");
+  }
+  chord({ closest: () => null });
+  await flush();
+  if (values.get("view-p") !== "list" || closed.length !== 1) {
+    throw new Error("Board shortcut did not restore the project list");
+  }
 });

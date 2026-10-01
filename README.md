@@ -12,6 +12,8 @@ Requires Super Productivity **18.7.0 or newer** (developed against the published
 2. In Super Productivity, open **Settings → Plugins → Choose Plugin File** and select the ZIP.
 3. Open a project and use **List / Kanban** in its project header. The selected view is remembered per project.
 
+For a keyboard toggle, go to **Settings → Keyboard** and assign `Ctrl+Alt+K` to **Toggle project List / Kanban** under Plugin Shortcuts. The app controls the binding; the plugin cannot set it automatically. While focus is inside the Kanban board, the same `Ctrl+Alt+K` chord closes it (unless you are typing in a field). The shortcut only toggles in project contexts.
+
 There is also a build artifact on every successful [CI run](https://github.com/Hendrik240298/superprod-kanban/actions/workflows/release.yml), but GitHub requires sign-in for artifacts and they expire. The Release ZIP is the stable, direct download.
 
 ## Use
@@ -28,6 +30,8 @@ To Do/Clarify is the fallback for unfinished tasks without a configured lane tag
 In **Configure lanes**, add or create tags, give lanes local display names, reorder tag lanes, or remove them without deleting tasks or tags. To Do/Clarify stays first, and Done stays last in Classic.
 
 Drag cards between lanes, or above/below another card to reorder tasks inside a lane. This order is stored by the plugin per project and template; it does not reorder the native task list. Click anywhere on a card (or focus it and press Enter/Space) to open native task details for tags, scheduling, estimates and completion. To move a task to a different tag lane from the sidebar, remove its old lane tag as well as adding the new one; drag-and-drop handles this automatically. When present, a right-aligned calendar/date (or clock/time for today) and time estimate follow the app's Boards card style; hover the schedule for its full date and time. Subtasks appear, but must be moved from their parent/native details.
+
+Native task-row shortcuts such as `Shift+T` (move the focused task to Today) are not available while the Kanban iframe has focus: its cards are not native task rows. Use native task details or switch back to List for those actions. The plugin does not intercept or recreate native task shortcuts.
 
 **Add tasks in a lane:** Use the single input and press Enter. Shortcuts remain visible and editable in the input until you submit:
 
@@ -48,7 +52,7 @@ deno test --allow-read tests/
 python3 build.py
 ```
 
-Install `dist/project-kanban.zip` using the instructions above. The ZIP contains `manifest.json`, `plugin.js`, and a self-contained `index.html` at its root. The [CI workflow](.github/workflows/release.yml) runs these checks on pushes and pull requests, uploads a short-lived build artifact, and publishes the ZIP as a GitHub Release when a version tag such as `v0.4.1` is pushed. Tags must match `src/manifest.json`'s version.
+Install `dist/project-kanban.zip` using the instructions above. The ZIP contains `manifest.json`, `plugin.js`, and a self-contained `index.html` at its root. The [CI workflow](.github/workflows/release.yml) runs these checks on pushes and pull requests, uploads a short-lived build artifact, and publishes the ZIP as a GitHub Release when a version tag such as `v0.4.2` is pushed. Tags must match `src/manifest.json`'s version.
 
 ## Verify on a disposable project
 
@@ -60,6 +64,7 @@ Install `dist/project-kanban.zip` using the instructions above. The ZIP contains
 6. In a lane's single input, type `Write report #Extra @2026-10-22 14:30 1h 30m` (with an existing unrelated tag), then submit. Check that the title is `Write report`, the task stays in this project/lane, and native details show the tag, timed schedule, and estimate.
 7. Type `@tom` and select tomorrow with Enter, then press Enter again to add the task. Try `@in 1` for a timed suggestion. Verify typing `@every friday` or an unknown `#` tag fails visibly rather than creating a task.
 8. Click a card and press Enter/Space on a focused card; each should open native task details without a separate ⋯ menu. Change its tags or mark it complete there and verify the board refreshes.
+9. Assign `Ctrl+Alt+K` to the plugin shortcut in Keyboard Settings, toggle into Kanban from List, then use the same chord while focused on a card to return to List. Typing in the inline task field should not trigger the board shortcut.
 
 ## Limits
 

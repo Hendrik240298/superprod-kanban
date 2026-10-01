@@ -12,6 +12,7 @@ Deno.test("view toggle persists per project and restores List on project switch"
   const stored = new Map();
   const shown = [];
   let button;
+  let shortcut;
   let active = { id: "a", type: "PROJECT" };
   const api = {
     Hooks: {
@@ -20,6 +21,9 @@ Deno.test("view toggle persists per project and restores List on project switch"
     },
     registerWorkContextHeaderButton: (cfg) => {
       button = cfg;
+    },
+    registerShortcut: (cfg) => {
+      shortcut = cfg;
     },
     registerHook: (name, handler) => callbacks.set(name, handler),
     onReady: (handler) => handler(),
@@ -45,6 +49,7 @@ Deno.test("view toggle persists per project and restores List on project switch"
   };
   await flush();
   equal(button.showFor, ["PROJECT"]);
+  equal(shortcut.id, "toggle-project-view");
   button.onClick(active);
   await flush();
   equal(stored.get("view-a"), "kanban");
@@ -60,4 +65,12 @@ Deno.test("view toggle persists per project and restores List on project switch"
   await flush();
   equal(stored.get("view-a"), "list");
   equal(shown.at(-1), "list:a");
+  shortcut.onExec();
+  await flush();
+  equal(stored.get("view-a"), "kanban");
+  equal(shown.at(-1), "board:a");
+  active = { id: "TODAY", type: "TODAY" };
+  shortcut.onExec();
+  await flush();
+  equal(stored.get("view-a"), "kanban");
 });

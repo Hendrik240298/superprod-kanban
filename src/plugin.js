@@ -33,36 +33,50 @@ async function reconcile(ctx) {
   }
 }
 
+function toggleView(ctx) {
+  void (async () => {
+    try {
+      const next = (await preferredView(ctx.id)) === "kanban"
+        ? "list"
+        : "kanban";
+      const current = await PluginAPI.getActiveWorkContext();
+      if (current?.type !== "PROJECT" || current.id !== ctx.id) return;
+      ++generation;
+      viewCache.set(ctx.id, next);
+      if (next === "kanban") PluginAPI.showInWorkContext();
+      else PluginAPI.closeWorkContextView();
+      await PluginAPI.persistDataSynced(next, viewKey(ctx.id));
+    } catch (error) {
+      viewCache.delete(ctx.id);
+      PluginAPI.log.err(
+        "Project Kanban: unable to save view preference",
+        error,
+      );
+      PluginAPI.showSnack({
+        msg: "Could not save the Kanban view preference",
+        type: "ERROR",
+      });
+      void reconcile(ctx);
+    }
+  })();
+}
+
 PluginAPI.registerWorkContextHeaderButton({
   label: "List / Kanban",
   icon: "view_kanban",
   showFor: ["PROJECT"],
-  onClick: (ctx) => {
-    void (async () => {
-      try {
-        const next = (await preferredView(ctx.id)) === "kanban"
-          ? "list"
-          : "kanban";
-        const current = await PluginAPI.getActiveWorkContext();
-        if (current?.type !== "PROJECT" || current.id !== ctx.id) return;
-        ++generation;
-        viewCache.set(ctx.id, next);
-        if (next === "kanban") PluginAPI.showInWorkContext();
-        else PluginAPI.closeWorkContextView();
-        await PluginAPI.persistDataSynced(next, viewKey(ctx.id));
-      } catch (error) {
-        viewCache.delete(ctx.id);
-        PluginAPI.log.err(
-          "Project Kanban: unable to save view preference",
-          error,
-        );
-        PluginAPI.showSnack({
-          msg: "Could not save the Kanban view preference",
-          type: "ERROR",
-        });
-        void reconcile(ctx);
-      }
-    })();
+  onClick: toggleView,
+});
+
+PluginAPI.registerShortcut({
+  id: "toggle-project-view",
+  label: "Toggle project List / Kanban",
+  onExec: () => {
+    void PluginAPI.getActiveWorkContext().then((ctx) => {
+      if (ctx?.type === "PROJECT") toggleView(ctx);
+    }).catch((error) => {
+      PluginAPI.log.err("Project Kanban: unable to toggle view", error);
+    });
   },
 });
 

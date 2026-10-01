@@ -736,6 +736,18 @@
   api.registerHook(api.Hooks.ANY_TASK_UPDATE, scheduleRefresh);
   api.registerHook(api.Hooks.WORK_CONTEXT_CHANGE, scheduleRefresh);
   api.registerHook(api.Hooks.PERSISTED_DATA_CHANGED, scheduleRefresh);
+  document.addEventListener("keydown", (event) => {
+    if (
+      !state.ctx || !event.ctrlKey || !event.altKey || event.shiftKey ||
+      event.metaKey || event.key.toLowerCase() !== "k" ||
+      event.getModifierState?.("AltGraph") ||
+      event.target?.closest?.("input, textarea, select, [contenteditable]")
+    ) return;
+    event.preventDefault();
+    void api.persistDataSynced("list", `view-${state.ctx.id}`)
+      .then(() => api.closeWorkContextView())
+      .catch((error) => status(String(error), true));
+  });
   void loadProject().catch((error) => {
     app.textContent = `Could not load Project Kanban: ${String(error)}`;
   });
