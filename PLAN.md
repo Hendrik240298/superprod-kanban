@@ -1,6 +1,6 @@
 # Project Kanban: design and implementation plan
 
-Status: the tag-based plugin is implemented in `src/`; screenshots confirm the first board renders, and the user verified task creation and cross-lane dragging in the running app. Version 0.2.2 includes two templates, task ordering within lanes, a compact action menu, a less redundant board header, and board-style scheduling/estimate card metadata; these additions and cross-project/restart persistence still need manual verification. This plan expands [IDEA.md](IDEA.md).
+Status: the tag-based plugin is implemented in `src/`; screenshots confirm the board renders, and the user verified task creation and cross-lane dragging in the running app. The user has used the board at work and likes it. Version 0.3.0 adds plugin-local inline tag suggestions, date/time scheduling and estimate controls; these additions and cross-project/restart persistence still need manual verification. This plan expands [IDEA.md](IDEA.md).
 
 ## Goal and scope
 
@@ -38,7 +38,7 @@ Important constraints:
 2. **Read-only board:** Implemented current-project To Do / In Progress / Done columns, unassigned/conflicting-tag fallback, backlog and subtask indicators, and hook-triggered refresh. **Still verify rendering in the app.**
 3. **Core editing:** Implemented project-aware task creation, native detail opening, completion changes, and cross-lane moves by selector or drag. Unit tests cover tag preservation and project scoping; **still verify host mutations in the app.**
 4. **Per-project configuration:** Implemented keyed synced view/lane preferences, tag selection and creation, lane aliases and ordering, and non-destructive removal. **Still verify persistence after restart/sync.**
-5. **Polish and release:** Basic responsive board styling, keyboard-accessible move controls behind a card menu, and plugin-local task ordering within a lane are included. The board's embedded toolbar only shows Configure lanes; the host project header provides view switching. Task cards show schedule and estimate chips from native task data. The classic and seven-lane workflow templates are stored per project; the latter hides completed tasks and uses tag lanes, not native backlog/scheduling. Further accessibility, edge-case and real-app testing remains.
+5. **Polish and release:** Basic responsive board styling, keyboard-accessible move controls behind a card menu, and plugin-local task ordering within a lane are included. The board's embedded toolbar only shows Configure lanes; the host project header provides view switching. Task cards show schedule and estimate indicators from native task data. The inline task form supports tag suggestions and schedule/estimate controls using the supported API, rather than the host's internal parser. The classic and seven-lane workflow templates are stored per project; the latter hides completed tasks and uses tag lanes, not native backlog/scheduling. Further accessibility, edge-case and real-app testing remains.
 
 ## Acceptance checks for a first usable version
 

@@ -28,6 +28,41 @@ Deno.test("scheduled date and time estimate metadata uses task API fields", () =
   equal(BoardCore.scheduledDate({}), null);
 });
 
+Deno.test("inline creation parses estimates and all-day or timed schedules", () => {
+  equal(BoardCore.parseEstimate(""), null);
+  equal(BoardCore.parseEstimate("1h 30m"), 5400000);
+  equal(BoardCore.parseEstimate("45m"), 2700000);
+  equal(BoardCore.parseEstimate("1.5h"), 5400000);
+  equal(BoardCore.parseSchedule("", ""), {});
+  equal(BoardCore.parseSchedule("2026-10-22", ""), { dueDay: "2026-10-22" });
+  equal(BoardCore.parseSchedule("2026-10-22", "14:30"), {
+    dueWithTime: new Date(2026, 9, 22, 14, 30).getTime(),
+  });
+  for (
+    const [day, time] of [["", "14:30"], ["2026-02-30", ""], [
+      "2026-10-22",
+      "25:00",
+    ]]
+  ) {
+    let rejected = false;
+    try {
+      BoardCore.parseSchedule(day, time);
+    } catch {
+      rejected = true;
+    }
+    equal(rejected, true);
+  }
+  for (const invalid of ["0m", "soon", "8d"]) {
+    let rejected = false;
+    try {
+      BoardCore.parseEstimate(invalid);
+    } catch {
+      rejected = true;
+    }
+    equal(rejected, true);
+  }
+});
+
 Deno.test("columns use tag names, local aliases and the two special lanes", () => {
   equal(BoardCore.columns(config, tags).map(({ label }) => label), [
     "To Do",

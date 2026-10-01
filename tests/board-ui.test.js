@@ -32,6 +32,11 @@ class Node {
   fire(key, event = {}) {
     this.listeners[key]?.(event);
   }
+  focus() {}
+  setSelectionRange(start, end) {
+    this.selectionStart = start;
+    this.selectionEnd = end;
+  }
 }
 
 function descendants(node, predicate) {
@@ -59,7 +64,10 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
       descendants(app, (node) => node.id === id)[0] || null,
   };
   const values = new Map();
-  const tags = [{ id: "progress", title: "In Progress" }];
+  const tags = [{ id: "progress", title: "In Progress" }, {
+    id: "extra",
+    title: "Extra",
+  }];
   const tasks = [
     {
       id: "a",
@@ -80,6 +88,8 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
     },
   ];
   const updates = [];
+  const added = [];
+  const errors = [];
   const hooks = new Map();
   const api = {
     Hooks: {
@@ -109,13 +119,20 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
       updates.push({ id, patch });
       Object.assign(tasks.find((task) => task.id === id), patch);
     },
+    addTask: async (fields) => {
+      added.push(fields);
+      const id = `new-${added.length}`;
+      tasks.push({ id, ...fields });
+      return id;
+    },
     selectTask: async () => {},
     log: { err: () => {} },
   };
-  new Function("window", "document", "BoardCore", source)(
+  new Function("window", "document", "BoardCore", "console", source)(
     { PluginAPI: api },
     document,
     BoardCore,
+    { error: (...args) => errors.push(args.join(" ")) },
   );
   await flush();
   if (
@@ -182,7 +199,7 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   picker.value = "workflow";
   picker.fire("change");
   await flush();
-  if (values.get("template-p") !== "workflow" || tags.length !== 7) {
+  if (values.get("template-p") !== "workflow" || tags.length !== 8) {
     throw new Error("Workflow template did not initialize its six tag lanes");
   }
   const lanes = descendants(
@@ -226,6 +243,164 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   }
   if (descendants(app, (node) => node.tag === "article").length !== 1) {
     throw new Error("Completed task should be hidden from Workflow");
+  }
+  const firstForm = descendants(
+    app,
+    (node) => node.tag === "form" && node.className === "add-row",
+  )[0];
+  const titleInput = descendants(
+    firstForm,
+    (node) => node.tag === "input" && node.type === "text" && !node.className,
+  )[0];
+  titleInput.value = "Write report #ex";
+  titleInput.selectionStart = titleInput.value.length;
+  titleInput.fire("input");
+  const extraOption = descendants(
+    firstForm,
+    (node) => node.className === "tag-option" && node.textContent === "Extra",
+  )[0];
+  if (
+    !extraOption ||
+    descendants(
+      firstForm,
+      (node) => node.className === "tag-option" && node.textContent === "Doing",
+    ).length
+  ) {
+    throw new Error("# autocomplete did not suggest the matching non-lane tag");
+  }
+  titleInput.fire("keydown", { key: "Enter", preventDefault() {} });
+  if (
+    titleInput.value !== "Write report" ||
+    !descendants(firstForm, (node) => node.className === "chosen-tag").length
+  ) {
+    throw new Error("# autocomplete did not add the tag and remove the token");
+  }
+  descendants(
+    firstForm,
+    (node) => node.tag === "button" && node.textContent === "Schedule",
+  )[0].fire("click");
+  const dateInput = descendants(firstForm, (node) => node.type === "date")[0];
+  const timeInput = descendants(firstForm, (node) => node.type === "time")[0];
+  dateInput.value = "2026-10-22";
+  dateInput.fire("change");
+  timeInput.value = "14:30";
+  timeInput.fire("change");
+  descendants(
+    firstForm,
+    (node) => node.tag === "button" && node.textContent === "Estimate",
+  )[0].fire("click");
+  const estimateInput = descendants(
+    firstForm,
+    (node) =>
+      node.tag === "input" && node.className === "" &&
+      node.attributes["aria-label"] === "Time estimate",
+  )[0];
+  estimateInput.value = "1h 30m";
+  estimateInput.fire("input");
+  firstForm.fire("submit", { preventDefault() {} });
+  await flush();
+  if (
+    added.length !== 1 || added[0].projectId !== "p" ||
+    added[0].title !== "Write report" ||
+    JSON.stringify(added[0].tagIds) !== JSON.stringify(["extra"]) ||
+    added[0].timeEstimate !== 5400000 || "dueWithTime" in added[0] ||
+    !updates.some(({ id, patch }) =>
+      id === "new-1" &&
+      patch.dueWithTime === new Date(2026, 9, 22, 14, 30).getTime()
+    )
+  ) {
+    throw new Error(
+      `Timed task was not created correctly: ${
+        JSON.stringify({ added, updates })
+      }`,
+    );
+  }
+  const nextForm = descendants(
+    app,
+    (node) => node.tag === "form" && node.className === "add-row",
+  )[0];
+  const nextTitle = descendants(
+    nextForm,
+    (node) =>
+      node.tag === "input" &&
+      node.attributes["aria-label"] === "New task in Clarify",
+  )[0];
+  nextTitle.value = "All-day task";
+  nextTitle.fire("input");
+  descendants(
+    nextForm,
+    (node) => node.tag === "button" && node.textContent === "Schedule",
+  )[0].fire("click");
+  const nextDate = descendants(nextForm, (node) => node.type === "date")[0];
+  nextDate.value = "2026-10-23";
+  nextDate.fire("change");
+  nextForm.fire("submit", { preventDefault() {} });
+  await flush();
+  if (
+    added.length !== 2 || added[1].dueDay !== "2026-10-23" ||
+    "dueWithTime" in added[1]
+  ) {
+    throw new Error("All-day schedule was not passed directly to addTask");
+  }
+  const lastForm = descendants(
+    app,
+    (node) => node.tag === "form" && node.className === "add-row",
+  )[0];
+  const lastTitle = descendants(
+    lastForm,
+    (node) => node.attributes["aria-label"] === "New task in Clarify",
+  )[0];
+  lastTitle.value = "Quick task";
+  lastTitle.fire("input");
+  descendants(
+    lastForm,
+    (node) => node.tag === "button" && node.textContent === "# Tags",
+  )[0].fire("click");
+  const tagSearch =
+    descendants(lastForm, (node) => node.className === "tag-search")[0];
+  tagSearch.value = "extra";
+  tagSearch.fire("input");
+  tagSearch.fire("keydown", { key: "Enter", preventDefault() {} });
+  if (
+    added.length !== 2 ||
+    !descendants(lastForm, (node) => node.className === "chosen-tag").length
+  ) {
+    throw new Error(
+      "Tag search Enter either submitted early or failed to select a tag",
+    );
+  }
+  descendants(
+    lastForm,
+    (node) => node.tag === "button" && node.textContent === "Estimate",
+  )[0].fire("click");
+  descendants(
+    lastForm,
+    (node) => node.tag === "button" && node.textContent === "2h",
+  )[0].fire("click");
+  descendants(
+    lastForm,
+    (node) => node.tag === "button" && node.textContent === "Schedule",
+  )[0].fire("click");
+  const invalidTime = descendants(lastForm, (node) => node.type === "time")[0];
+  invalidTime.value = "14:30";
+  invalidTime.fire("change");
+  lastForm.fire("submit", { preventDefault() {} });
+  if (
+    added.length !== 2 ||
+    !errors.some((error) => error.includes("Choose a scheduled date"))
+  ) {
+    throw new Error("A time without a date was not rejected visibly");
+  }
+  const lastDate = descendants(lastForm, (node) => node.type === "date")[0];
+  lastDate.value = "2026-10-24";
+  lastDate.fire("change");
+  lastForm.fire("submit", { preventDefault() {} });
+  await flush();
+  if (
+    added.length !== 3 || added[2].timeEstimate !== 7200000 ||
+    !added[2].tagIds.includes("extra")
+  ) {
+    throw new Error("Tag search or estimate preset was not applied");
   }
   if (!hooks.has("anyTaskUpdate")) throw new Error("Task refresh hook missing");
 });

@@ -276,18 +276,71 @@ select:focus-visible,
 }
 .add-row {
   display: flex;
-  gap: 6px;
+  flex-direction: column;
+  gap: 8px;
   padding: var(--s, 8px);
   border-top: 1px solid var(--divider-color, #aaa5);
 }
+.add-main,
+.add-actions,
+.add-fields,
+.chosen-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.add-main {
+  flex-wrap: nowrap;
+}
+.chosen-tags:empty {
+  display: none;
+}
+.add-row [hidden] {
+  display: none;
+}
 .add-row input {
   min-width: 0;
-  width: 100%;
   background: var(--card-bg, #fff);
   color: inherit;
   border: 1px solid var(--divider-color, #aaa5);
   border-radius: 6px;
   padding: 6px;
+}
+.add-main input,
+.tag-search {
+  width: 100%;
+}
+.add-fields input {
+  max-width: 100%;
+}
+.add-actions button,
+.add-fields button,
+.chosen-tags button {
+  padding: 4px 7px;
+  font-size: .8rem;
+}
+.add-actions button,
+.chosen-tag {
+  border-radius: 999px !important;
+}
+.tag-suggestions {
+  max-height: 160px;
+  overflow-y: auto;
+  border: 1px solid var(--divider-color, #aaa5);
+  border-radius: 6px;
+  background: var(--card-bg, #fff);
+  padding: 4px;
+}
+.tag-suggestions .tag-option {
+  display: block;
+  width: 100%;
+  border: 0;
+  text-align: left;
+}
+.tag-option[aria-selected="true"],
+.tag-option:hover {
+  background: var(--bg-darker, #efefef);
 }
 .empty {
   padding: var(--s, 8px);

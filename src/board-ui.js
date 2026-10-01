@@ -12,6 +12,7 @@
     order: {},
     settings: false,
     busy: false,
+    drafts: new Map(),
   };
   let loadToken = 0;
   let refreshTimer;
@@ -219,36 +220,301 @@
       if (taskId) void move(taskId, id, null);
     });
 
+    section.append(renderAddForm(lane, id));
+    return section;
+  }
+
+  function renderAddForm(lane, laneId) {
+    const key = `${state.ctx.id}:${state.template}:${laneId}`;
+    const draft = state.drafts.get(key) || {
+      title: "",
+      tagIds: [],
+      day: "",
+      time: "",
+      estimate: "",
+    };
+    state.drafts.set(key, draft);
     const form = el("form", "add-row");
+    const main = el("div", "add-main");
     const input = el("input");
     input.type = "text";
     input.required = true;
     input.maxLength = 500;
+    input.value = draft.title;
     input.placeholder = `Add to ${lane.label}`;
     input.setAttribute("aria-label", `New task in ${lane.label}`);
     const add = el("button", "", "Add");
     add.type = "submit";
-    form.append(input, add);
+    main.append(input, add);
+    form.append(main);
+
+    const suggestions = el("div", "tag-suggestions");
+    suggestions.id = `tags-${laneId}`;
+    suggestions.setAttribute("role", "listbox");
+    suggestions.hidden = true;
+    input.setAttribute("aria-autocomplete", "list");
+    input.setAttribute("aria-controls", suggestions.id);
+    input.setAttribute("aria-expanded", "false");
+    form.append(suggestions);
+
+    const actions = el("div", "add-actions");
+    const dateButton = control("Schedule", () => {
+      hideSuggestions();
+      tagSearch.hidden = true;
+      dateFields.hidden = !dateFields.hidden;
+      if (!dateFields.hidden) dayInput.focus();
+    });
+    const tagButton = control("# Tags", () => {
+      tagSearch.value = activeToken
+        ? input.value.slice(activeToken.start + 1, activeToken.end)
+        : "";
+      tagSearch.hidden = !tagSearch.hidden;
+      if (!tagSearch.hidden) {
+        tagSearch.focus();
+        showSuggestions(tagSearch.value);
+      } else hideSuggestions();
+    });
+    const estimateButton = control("Estimate", () => {
+      hideSuggestions();
+      tagSearch.hidden = true;
+      estimateFields.hidden = !estimateFields.hidden;
+      if (!estimateFields.hidden) estimateInput.focus();
+    });
+    actions.append(dateButton, tagButton, estimateButton);
+    actions.hidden = !draft.title && !draft.tagIds.length && !draft.day &&
+      !draft.estimate;
+    form.append(actions);
+
+    const chosenTags = el("div", "chosen-tags");
+    function renderChosenTags() {
+      chosenTags.replaceChildren();
+      for (const tagId of draft.tagIds) {
+        const tag = state.tags.find((item) => item.id === tagId);
+        if (!tag) continue;
+        const remove = control(`${tag.title} ×`, () => {
+          draft.tagIds = draft.tagIds.filter((id) => id !== tagId);
+          renderChosenTags();
+          if (!suggestions.hidden) showSuggestions(tagSearch.value);
+        }, "chosen-tag");
+        remove.setAttribute("aria-label", `Remove tag ${tag.title}`);
+        chosenTags.append(remove);
+      }
+    }
+    renderChosenTags();
+    form.append(chosenTags);
+
+    const tagSearch = el("input", "tag-search");
+    tagSearch.type = "search";
+    tagSearch.value = "";
+    tagSearch.placeholder = "Search existing tags";
+    tagSearch.setAttribute("aria-label", "Search existing tags");
+    tagSearch.hidden = true;
+    form.append(tagSearch);
+
+    let activeToken = null;
+    let candidates = [];
+    let selectedIndex = 0;
+    function hideSuggestions() {
+      suggestions.hidden = true;
+      input.setAttribute("aria-expanded", "false");
+      activeToken = null;
+    }
+    function chooseTag(tag) {
+      if (!tag || draft.tagIds.includes(tag.id)) return;
+      draft.tagIds.push(tag.id);
+      if (activeToken) {
+        const left = input.value.slice(0, activeToken.start).trimEnd();
+        const right = input.value.slice(activeToken.end).trimStart();
+        input.value = [left, right].filter(Boolean).join(" ");
+        draft.title = input.value;
+        input.focus();
+        input.setSelectionRange(left.length, left.length);
+      }
+      renderChosenTags();
+      hideSuggestions();
+      tagSearch.hidden = true;
+      tagSearch.value = "";
+    }
+    function showSuggestions(query) {
+      const laneTagIds = new Set(state.config.lanes.map((item) => item.tagId));
+      candidates = state.tags.filter((tag) =>
+        tag.id !== "TODAY" && !laneTagIds.has(tag.id) &&
+        !draft.tagIds.includes(tag.id) &&
+        tag.title?.toLowerCase().includes(query.toLowerCase())
+      ).slice(0, 10);
+      selectedIndex = 0;
+      suggestions.replaceChildren();
+      for (const [index, tag] of candidates.entries()) {
+        const option = control(tag.title, () => chooseTag(tag), "tag-option");
+        option.setAttribute("role", "option");
+        option.setAttribute("aria-selected", String(index === selectedIndex));
+        suggestions.append(option);
+      }
+      if (!candidates.length) {
+        suggestions.append(
+          el(
+            "span",
+            "muted",
+            "No matching tags. Lane tags come from the column.",
+          ),
+        );
+      }
+      suggestions.hidden = false;
+      input.setAttribute("aria-expanded", "true");
+    }
+    function navigateSuggestions(event) {
+      if (suggestions.hidden) return false;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        tagSearch.hidden = true;
+        hideSuggestions();
+        return true;
+      }
+      if (!candidates.length) return false;
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        selectedIndex = (selectedIndex + (event.key === "ArrowDown" ? 1 : -1) +
+          candidates.length) % candidates.length;
+        Array.from(suggestions.children).forEach((node, i) =>
+          node.setAttribute("aria-selected", String(i === selectedIndex))
+        );
+        return true;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        chooseTag(candidates[selectedIndex]);
+        return true;
+      }
+      return false;
+    }
+    input.addEventListener("focus", () => {
+      actions.hidden = false;
+    });
+    input.addEventListener("input", () => {
+      draft.title = input.value;
+      actions.hidden = false;
+      const caret = input.selectionStart ?? input.value.length;
+      const match = /(^|\s)#([^\s#]*)$/.exec(input.value.slice(0, caret));
+      if (!match) {
+        hideSuggestions();
+        return;
+      }
+      activeToken = { start: caret - match[2].length - 1, end: caret };
+      showSuggestions(match[2]);
+    });
+    input.addEventListener("keydown", (event) => {
+      if (activeToken) navigateSuggestions(event);
+    });
+    tagSearch.addEventListener("input", () => showSuggestions(tagSearch.value));
+    tagSearch.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") event.preventDefault();
+      if (navigateSuggestions(event) && event.key === "Escape") input.focus();
+    });
+
+    const dateFields = el("div", "add-fields");
+    dateFields.hidden = !draft.day && !draft.time;
+    const dayInput = el("input");
+    dayInput.type = "date";
+    dayInput.value = draft.day;
+    dayInput.setAttribute("aria-label", "Scheduled date");
+    dayInput.addEventListener("change", () => {
+      draft.day = dayInput.value;
+    });
+    const timeInput = el("input");
+    timeInput.type = "time";
+    timeInput.value = draft.time;
+    timeInput.setAttribute("aria-label", "Scheduled time (optional)");
+    timeInput.addEventListener("change", () => {
+      draft.time = timeInput.value;
+    });
+    for (const [label, offset] of [["Today", 0], ["Tomorrow", 1]]) {
+      dateFields.append(control(label, () => {
+        const next = new Date();
+        next.setDate(next.getDate() + offset);
+        dayInput.value = `${next.getFullYear()}-${
+          String(next.getMonth() + 1).padStart(2, "0")
+        }-${String(next.getDate()).padStart(2, "0")}`;
+        draft.day = dayInput.value;
+      }));
+    }
+    const clearDate = control("Clear", () => {
+      dayInput.value = "";
+      timeInput.value = "";
+      draft.day = "";
+      draft.time = "";
+    });
+    clearDate.setAttribute("aria-label", "Clear scheduled date and time");
+    dateFields.append(dayInput, timeInput, clearDate);
+    form.append(dateFields);
+
+    const estimateFields = el("div", "add-fields");
+    estimateFields.hidden = !draft.estimate;
+    const estimateInput = el("input");
+    estimateInput.type = "text";
+    estimateInput.value = draft.estimate;
+    estimateInput.placeholder = "e.g. 1h 30m";
+    estimateInput.setAttribute("aria-label", "Time estimate");
+    estimateInput.addEventListener("input", () => {
+      draft.estimate = estimateInput.value;
+    });
+    for (const value of ["15m", "30m", "1h", "2h"]) {
+      estimateFields.append(control(value, () => {
+        estimateInput.value = draft.estimate = value;
+      }));
+    }
+    const clearEstimate = control("Clear", () => {
+      estimateInput.value = draft.estimate = "";
+    });
+    clearEstimate.setAttribute("aria-label", "Clear estimate");
+    estimateFields.append(estimateInput, clearEstimate);
+    form.append(estimateFields);
+
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      const title = input.value.trim();
+      const title = draft.title.trim();
       if (!title || !state.ctx) return;
       const projectId = state.ctx.id;
+      let schedule, timeEstimate;
+      try {
+        schedule = BoardCore.parseSchedule(draft.day, draft.time);
+        timeEstimate = BoardCore.parseEstimate(draft.estimate);
+      } catch (error) {
+        status(error.message, true);
+        return;
+      }
       void run(async () => {
-        await api.addTask({
+        const fields = BoardCore.createFields(
+          projectId,
+          laneId,
+          state.config,
+          state.template,
+        );
+        const taskId = await api.addTask({
           title,
-          ...BoardCore.createFields(
-            projectId,
-            id,
-            state.config,
-            state.template,
-          ),
+          ...fields,
+          tagIds: [...fields.tagIds, ...draft.tagIds],
+          ...(schedule.dueDay ? { dueDay: schedule.dueDay } : {}),
+          ...(timeEstimate ? { timeEstimate } : {}),
         });
-        input.value = "";
+        if (schedule.dueWithTime) {
+          try {
+            // PluginCreateTaskData supports all-day dates; timed dates require an update.
+            await api.updateTask(taskId, {
+              dueWithTime: schedule.dueWithTime,
+              dueDay: null,
+            });
+          } catch {
+            state.drafts.delete(key);
+            await loadProject();
+            throw new Error(
+              "Task created, but its scheduled time could not be saved. Edit it in task details.",
+            );
+          }
+        }
+        state.drafts.delete(key);
       });
     });
-    section.append(form);
-    return section;
+    return form;
   }
 
   function renderCard(task, currentLane, columns, nextCardId) {

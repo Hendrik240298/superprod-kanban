@@ -36,6 +36,49 @@ const BoardCore = (() => {
     return { date, timed: false };
   }
 
+  function parseEstimate(value) {
+    const text = value.trim().toLowerCase();
+    if (!text) return null;
+    const match = /^(?:(\d+(?:[.,]\d+)?)\s*h)?\s*(?:(\d+)\s*m)?$/.exec(text);
+    if (!match || (!match[1] && !match[2])) {
+      throw new Error("Enter an estimate such as 45m or 1h 30m.");
+    }
+    const minutes = Number((match[1] || "0").replace(",", ".")) * 60 +
+      Number(match[2] || "0");
+    if (!Number.isFinite(minutes) || minutes <= 0 || minutes > 10080) {
+      throw new Error("Estimate must be between 1 minute and 7 days.");
+    }
+    return Math.round(minutes * 60000);
+  }
+
+  function parseSchedule(day, time) {
+    if (!day && !time) return {};
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+    if (!match) throw new Error("Choose a scheduled date first.");
+    const year = +match[1];
+    const month = +match[2] - 1;
+    const date = +match[3];
+    const clock = time ? /^(\d{2}):(\d{2})$/.exec(time) : null;
+    if (time && (!clock || +clock[1] > 23 || +clock[2] > 59)) {
+      throw new Error("Choose a valid scheduled time.");
+    }
+    const at = new Date(
+      year,
+      month,
+      date,
+      clock ? +clock[1] : 0,
+      clock ? +clock[2] : 0,
+    );
+    if (
+      at.getFullYear() !== year || at.getMonth() !== month ||
+      at.getDate() !== date ||
+      (clock && (at.getHours() !== +clock[1] || at.getMinutes() !== +clock[2]))
+    ) {
+      throw new Error("Choose a valid scheduled date and time.");
+    }
+    return clock ? { dueWithTime: at.getTime() } : { dueDay: day };
+  }
+
   function normalizeConfig(value, availableTags) {
     const tags = new Set(availableTags.map((tag) => tag.id));
     const lanes = [];
@@ -167,6 +210,8 @@ const BoardCore = (() => {
     WORKFLOW_TAGS,
     estimateLabel,
     scheduledDate,
+    parseEstimate,
+    parseSchedule,
     normalizeConfig,
     columns,
     laneFor,
