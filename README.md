@@ -27,7 +27,7 @@ To Do/Clarify is the fallback for unfinished tasks without a configured lane tag
 
 In **Configure lanes**, add or create tags, give lanes local display names, reorder tag lanes, or remove them without deleting tasks or tags. To Do/Clarify stays first, and Done stays last in Classic.
 
-Drag cards between lanes, or above/below another card to reorder tasks inside a lane. This order is stored by the plugin per project and template; it does not reorder the native task list. The **⋯** menu offers a Move to selector for keyboard/touch use (and Complete in Workflow). Click a card title to open native task details. Cards show scheduled date/time and time estimate when present. Subtasks appear, but must be moved from their parent/native details.
+Drag cards between lanes, or above/below another card to reorder tasks inside a lane. This order is stored by the plugin per project and template; it does not reorder the native task list. The **⋯** menu offers a Move to selector for keyboard/touch use (and Complete in Workflow). Click a card title to open native task details. When present, a right-aligned calendar/date (or clock/time for today) and time estimate follow the app's Boards card style; hover the schedule for its full date and time. Subtasks appear, but must be moved from their parent/native details.
 
 ## Build from source
 
@@ -40,7 +40,7 @@ deno test --allow-read tests/
 python3 build.py
 ```
 
-Install `dist/project-kanban.zip` using the instructions above. The ZIP contains `manifest.json`, `plugin.js`, and a self-contained `index.html` at its root. The [CI workflow](.github/workflows/release.yml) runs these checks on pushes and pull requests, uploads a short-lived build artifact, and publishes the ZIP as a GitHub Release when a version tag such as `v0.2.1` is pushed. Tags must match `src/manifest.json`'s version.
+Install `dist/project-kanban.zip` using the instructions above. The ZIP contains `manifest.json`, `plugin.js`, and a self-contained `index.html` at its root. The [CI workflow](.github/workflows/release.yml) runs these checks on pushes and pull requests, uploads a short-lived build artifact, and publishes the ZIP as a GitHub Release when a version tag such as `v0.2.2` is pushed. Tags must match `src/manifest.json`'s version.
 
 ## Verify on a disposable project
 

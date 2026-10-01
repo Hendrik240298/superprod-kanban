@@ -295,17 +295,6 @@
     heading.append(title);
     const meta = el("div", "card-meta");
     const scheduled = BoardCore.scheduledDate(task);
-    if (scheduled) {
-      const label = new Intl.DateTimeFormat(undefined, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        ...(scheduled.timed ? { hour: "numeric", minute: "2-digit" } : {}),
-      }).format(scheduled.date);
-      meta.append(el("span", "meta-chip", `◷ Scheduled ${label}`));
-    }
-    const estimate = BoardCore.estimateLabel(task.timeEstimate);
-    if (estimate) meta.append(el("span", "meta-chip", `◴ Est. ${estimate}`));
     if (task.parentId) {
       meta.append(el("span", "meta-chip", "Subtask · open details to edit"));
     }
@@ -349,6 +338,40 @@
           })));
       }
       heading.append(controls);
+    }
+    const estimate = BoardCore.estimateLabel(task.timeEstimate);
+    if (estimate) {
+      const time = el("span", "card-estimate", estimate);
+      time.title = `Estimated time: ${estimate}`;
+      heading.append(time);
+    }
+    if (scheduled) {
+      const full = new Intl.DateTimeFormat(undefined, {
+        dateStyle: "full",
+        ...(scheduled.timed ? { timeStyle: "short" } : {}),
+      }).format(scheduled.date);
+      const today = new Date();
+      const isToday = scheduled.timed &&
+        scheduled.date.toDateString() === today.toDateString();
+      const short = new Intl.DateTimeFormat(
+        undefined,
+        isToday
+          ? { hour: "numeric", minute: "2-digit" }
+          : { month: "numeric", day: "numeric" },
+      ).format(scheduled.date);
+      const badge = el(
+        "span",
+        scheduled.timed ? "schedule-indicator timed" : "schedule-indicator",
+      );
+      badge.setAttribute("role", "img");
+      badge.setAttribute("aria-label", `Scheduled for ${full}`);
+      badge.title = `Scheduled for ${full}`;
+      const icon = el("span", "schedule-icon");
+      icon.setAttribute("aria-hidden", "true");
+      const date = el("span", "schedule-date", short);
+      date.setAttribute("aria-hidden", "true");
+      badge.append(icon, date);
+      heading.append(badge);
     }
     card.append(heading);
     if (meta.children.length) card.append(meta);

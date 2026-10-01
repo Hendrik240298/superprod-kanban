@@ -147,8 +147,79 @@ select:focus-visible,
 .card-heading {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 4px;
+  align-items: center;
+  gap: 6px;
+}
+.card-estimate {
+  flex: none;
+  white-space: nowrap;
+  font-size: .9rem;
+  color: var(--text-color-muted, #777);
+}
+.schedule-indicator {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  color: var(--text-color-muted, #777);
+}
+.schedule-icon {
+  position: relative;
+  width: 22px;
+  height: 21px;
+  border: 2px solid currentColor;
+  border-radius: 3px;
+}
+.schedule-icon::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 0;
+  right: 0;
+  border-top: 2px solid currentColor;
+}
+.schedule-icon::after {
+  content: "";
+  position: absolute;
+  top: -5px;
+  left: 4px;
+  width: 2px;
+  height: 5px;
+  background: currentColor;
+  box-shadow: 9px 0 currentColor;
+}
+.schedule-indicator.timed .schedule-icon {
+  width: 21px;
+  border-radius: 50%;
+}
+.schedule-indicator.timed .schedule-icon::before {
+  top: 3px;
+  left: 8px;
+  width: 4px;
+  height: 7px;
+  border-top: 0;
+  border-left: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+}
+.schedule-indicator.timed .schedule-icon::after {
+  top: -4px;
+  left: 2px;
+  width: 5px;
+  height: 2px;
+  transform: rotate(-30deg);
+  box-shadow: none;
+}
+.schedule-date {
+  margin-top: -2px;
+  padding: 1px 3px 0;
+  border: 1px solid var(--divider-color, #aaa5);
+  border-radius: 4px;
+  background: var(--bg-lighter, var(--card-bg, #fff));
+  font-size: .7rem;
+  line-height: 1;
+  white-space: nowrap;
 }
 .card-meta {
   display: flex;

@@ -136,21 +136,35 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   ) {
     throw new Error("Template picker should be behind Configure lanes");
   }
-  const initialChips = descendants(
+  const dates = descendants(
     app,
-    (node) => node.className === "meta-chip",
+    (node) => node.className === "schedule-date",
   ).map((node) => node.textContent);
+  const schedules = descendants(
+    app,
+    (node) => node.className.startsWith("schedule-indicator"),
+  );
+  const estimates = descendants(
+    app,
+    (node) => node.className === "card-estimate",
+  );
+  const expectedDate = new Intl.DateTimeFormat(undefined, {
+    month: "numeric",
+    day: "numeric",
+  }).format(new Date(2026, 9, 8));
   if (
-    !initialChips.some((text) =>
-      text.includes("Scheduled") && text.includes("2026") && text.includes("8")
-    ) ||
-    !initialChips.some((text) => text.includes("Est. 1h 30m")) ||
-    !initialChips.some((text) =>
-      text.includes("Scheduled") && text.includes("30")
-    )
+    schedules.length !== 2 || dates[0] !== expectedDate ||
+    schedules[1].className !== "schedule-indicator timed" ||
+    !schedules[1].attributes["aria-label"].includes("2026") ||
+    estimates.length !== 1 || estimates[0].textContent !== "1h 30m" ||
+    descendants(app, (node) =>
+      node.className === "meta-chip" &&
+      /Scheduled|Est\./.test(node.textContent)).length
   ) {
     throw new Error(
-      `Missing schedule or estimate chips: ${JSON.stringify(initialChips)}`,
+      `Expected native-style schedule and estimate indicators: ${
+        JSON.stringify(dates)
+      }`,
     );
   }
   configure.fire("click");

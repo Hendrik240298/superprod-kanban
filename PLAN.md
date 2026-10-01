@@ -1,6 +1,6 @@
 # Project Kanban: design and implementation plan
 
-Status: the tag-based plugin is implemented in `src/`; screenshots confirm the first board renders, and the user verified task creation and cross-lane dragging in the running app. Version 0.2.1 adds two templates, task ordering within lanes, a compact action menu, a less redundant board header, and scheduling/estimate card metadata; these additions and cross-project/restart persistence still need manual verification. This plan expands [IDEA.md](IDEA.md).
+Status: the tag-based plugin is implemented in `src/`; screenshots confirm the first board renders, and the user verified task creation and cross-lane dragging in the running app. Version 0.2.2 includes two templates, task ordering within lanes, a compact action menu, a less redundant board header, and board-style scheduling/estimate card metadata; these additions and cross-project/restart persistence still need manual verification. This plan expands [IDEA.md](IDEA.md).
 
 ## Goal and scope
 
