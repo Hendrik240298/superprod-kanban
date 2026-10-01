@@ -1,0 +1,27 @@
+{
+  "id": "project-kanban",
+  "name": "Project Kanban",
+  "version": "0.1.0",
+  "description": "A tag-based Kanban view inside each Super Productivity project.",
+  "manifestVersion": 1,
+  "minSupVersion": "18.7.0",
+  "iFrame": true,
+  "isSkipMenuEntry": true,
+  "hooks": ["workContextChange", "persistedDataChanged", "anyTaskUpdate"],
+  "permissions": [
+    "getActiveWorkContext",
+    "showInWorkContext",
+    "closeWorkContextView",
+    "registerWorkContextHeaderButton",
+    "registerHook",
+    "getTasks",
+    "getAllTags",
+    "getAllProjects",
+    "addTag",
+    "addTask",
+    "updateTask",
+    "selectTask",
+    "loadSyncedData",
+    "persistDataSynced"
+  ]
+}

@@ -1,0 +1,214 @@
+:root {
+  color-scheme: light dark;
+  font-family: var(--font-primary-stack, system-ui, sans-serif);
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  color: var(--text-color, #292929);
+  background: var(--bg, #f7f7f7);
+}
+button,
+input,
+select {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  opacity: .55;
+  cursor: wait;
+}
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--c-primary, #7559d9);
+  outline-offset: 2px;
+}
+.shell {
+  min-height: 100vh;
+  padding: var(--s2, 16px);
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s, 8px);
+  margin-bottom: var(--s2, 16px);
+}
+.toolbar h1 {
+  font-size: 1.15rem;
+  line-height: 1.4;
+  margin: 0 auto 0 0;
+  overflow-wrap: anywhere;
+}
+.toolbar button,
+.settings button,
+.card button,
+.add-row button {
+  border: 1px solid var(--divider-color, #aaa5);
+  border-radius: 6px;
+  background: var(--card-bg, #fff);
+  color: var(--text-color, #292929);
+  padding: 6px 10px;
+}
+.toolbar button:hover,
+.settings button:hover,
+.card button:hover {
+  border-color: var(--c-primary, #7559d9);
+}
+.muted {
+  color: var(--text-color-muted, #777);
+  font-size: .85rem;
+}
+.status {
+  min-height: 1.5em;
+  margin: 0 0 var(--s, 8px);
+}
+.status.error {
+  color: var(--c-warn, #bb2828);
+}
+.board {
+  display: flex;
+  gap: var(--s2, 16px);
+  align-items: flex-start;
+  overflow-x: auto;
+  padding-bottom: var(--s2, 16px);
+}
+.lane {
+  flex: 0 0 min(290px, 85vw);
+  min-width: 0;
+  max-height: calc(100vh - 125px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--divider-color, #aaa5);
+  border-radius: var(--card-border-radius, 12px);
+  background: var(--bg-darker, #efefef);
+}
+.lane.drop-target {
+  outline: 2px solid var(--c-primary, #7559d9);
+}
+.lane-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: var(--s2, 16px);
+}
+.lane-header h2 {
+  margin: 0;
+  flex: 1;
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+.count {
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: var(--card-bg, #fff);
+}
+.cards {
+  padding: 0 var(--s, 8px) var(--s, 8px);
+  overflow-y: auto;
+  min-height: 52px;
+}
+.card {
+  margin: 0 0 var(--s, 8px);
+  padding: var(--s2, 16px);
+  border-radius: var(--card-border-radius, 10px);
+  background: var(--card-bg, #fff);
+  box-shadow: var(--whiteframe-shadow-1dp, 0 1px 4px #0002);
+}
+.card[draggable="true"] {
+  cursor: grab;
+}
+.card-title {
+  border: 0 !important;
+  background: none !important;
+  padding: 0 !important;
+  width: 100%;
+  text-align: left;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.card-meta {
+  margin: 6px 0;
+}
+.card-controls {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.card-controls select {
+  min-width: 0;
+  flex: 1;
+}
+.card-controls label {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  gap: 3px;
+}
+.add-row {
+  display: flex;
+  gap: 6px;
+  padding: var(--s, 8px);
+  border-top: 1px solid var(--divider-color, #aaa5);
+}
+.add-row input {
+  min-width: 0;
+  width: 100%;
+  background: var(--card-bg, #fff);
+  color: inherit;
+  border: 1px solid var(--divider-color, #aaa5);
+  border-radius: 6px;
+  padding: 6px;
+}
+.empty {
+  padding: var(--s, 8px);
+}
+.settings {
+  max-width: 750px;
+  padding: var(--s2, 16px);
+  margin: 0 0 var(--s2, 16px);
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--divider-color, #aaa5);
+  border-radius: var(--card-border-radius, 10px);
+}
+.settings h2 {
+  font-size: 1rem;
+  margin: 0 0 var(--s, 8px);
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+.settings-row input,
+.settings-row select,
+.card select {
+  background: var(--card-bg, #fff);
+  color: inherit;
+  border: 1px solid var(--divider-color, #aaa5);
+  border-radius: 6px;
+  padding: 6px;
+}
+.settings-row input {
+  min-width: 0;
+  flex: 1;
+}
+.settings-row select {
+  max-width: 100%;
+}
+@media (max-width: 650px) {
+  .shell {
+    padding: 8px;
+  }
+  .lane {
+    max-height: calc(100vh - 150px);
+  }
+}
