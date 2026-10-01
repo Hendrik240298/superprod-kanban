@@ -13,9 +13,13 @@
     settings: false,
     busy: false,
     drafts: new Map(),
+    focusedCard: null,
+    focusAdd: null,
+    help: false,
   };
   let loadToken = 0;
   let refreshTimer;
+  let lastG = 0;
 
   const el = (tag, className, text) => {
     const node = document.createElement(tag);
@@ -112,6 +116,10 @@
       token !== loadToken ||
       (await api.getActiveWorkContext())?.id !== projectId
     ) return;
+    if (state.ctx?.id !== projectId) {
+      state.focusedCard = null;
+      state.focusAdd = null;
+    }
     state.ctx = ctx;
     state.tags = tags;
     state.tasks = tasks;
@@ -155,6 +163,9 @@
 
   function render() {
     if (!state.ctx) return;
+    const restoreCard = document.activeElement?.classList.contains("card")
+      ? state.focusedCard
+      : null;
     const shell = el("div", "shell");
     const toolbar = el("header", "toolbar");
     toolbar.append(
@@ -167,6 +178,15 @@
     shell.append(el("p", "status", ""));
     shell.lastChild.id = "board-status";
     if (state.settings) shell.append(renderSettings());
+    if (state.help && !state.settings) {
+      shell.append(
+        el(
+          "p",
+          "keyboard-help",
+          "j/k: next/previous card · h/l: lane · gg/G: first/last · Enter: details · a/i: add · d: toggle done · ?: hide help · Ctrl+Alt+K: List",
+        ),
+      );
+    }
     const board = el("div", "board");
     const columns = BoardCore.columns(state.config, state.tags, state.template);
     const grouped = BoardCore.orderCards(
@@ -185,11 +205,36 @@
     }
     shell.append(board);
     app.replaceChildren(shell);
+    if (
+      state.focusAdd && (state.focusAdd.projectId !== state.ctx.id ||
+        state.focusAdd.template !== state.template)
+    ) state.focusAdd = null;
+    if (
+      state.focusAdd?.projectId === state.ctx.id &&
+      state.focusAdd?.template === state.template
+    ) {
+      const lane = Array.from(document.querySelectorAll(".lane")).find((node) =>
+        node.dataset.laneId === state.focusAdd.laneId
+      );
+      state.focusAdd = null;
+      lane?.querySelector(".add-row input")?.focus();
+    } else if (restoreCard) {
+      const card = Array.from(document.querySelectorAll(".card")).find((node) =>
+        node.dataset.taskId === restoreCard.taskId
+      );
+      const lane = Array.from(document.querySelectorAll(".lane")).find((node) =>
+        node.dataset.laneId === restoreCard.laneId
+      );
+      (card || lane?.querySelector(".card") ||
+        document.querySelector(".card") ||
+        document.querySelector(".toolbar button"))?.focus();
+    }
   }
 
   function renderLane(lane, tasks) {
     const id = lane.tagId || lane.kind;
     const section = el("section", "lane");
+    section.dataset.laneId = id;
     section.setAttribute("aria-label", lane.label);
     const header = el("div", "lane-header");
     header.append(
@@ -392,6 +437,17 @@
     });
     input.addEventListener("keydown", (event) => {
       if (activeToken) navigateSuggestions(event);
+      else if (event.key === "Escape") {
+        event.preventDefault();
+        const lane = Array.from(document.querySelectorAll(".lane")).find((
+          node,
+        ) => node.dataset.laneId === laneId);
+        const cards = Array.from(lane?.querySelectorAll(".card") || []);
+        (cards.find((node) =>
+          node.dataset.taskId === state.focusedCard?.taskId
+        ) ||
+          cards[0] || document.querySelector(".toolbar button"))?.focus();
+      }
     });
     input.addEventListener("keyup", (event) => {
       if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
@@ -446,6 +502,7 @@
           }
         }
         state.drafts.delete(key);
+        state.focusAdd = { projectId, template: state.template, laneId };
       });
     });
     return form;
@@ -453,6 +510,10 @@
 
   function renderCard(task, currentLane, nextCardId) {
     const card = el("article", "card");
+    card.dataset.taskId = task.id;
+    card.addEventListener("focus", () => {
+      state.focusedCard = { laneId: currentLane, taskId: task.id };
+    });
     card.setAttribute("role", "button");
     card.tabIndex = 0;
     card.setAttribute(
@@ -747,6 +808,84 @@
     void api.persistDataSynced("list", `view-${state.ctx.id}`)
       .then(() => api.closeWorkContextView())
       .catch((error) => status(String(error), true));
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "g") lastG = 0;
+    if (
+      !state.ctx || event.ctrlKey || event.altKey || event.metaKey ||
+      event.target?.closest?.(
+        "input, textarea, select, button, [contenteditable]",
+      ) ||
+      state.settings
+    ) return;
+    const lanes = Array.from(document.querySelectorAll(".lane"));
+    if (!lanes.length) return;
+    const current = state.focusedCard;
+    const laneIndex = Math.max(
+      0,
+      lanes.findIndex((lane) => lane.dataset.laneId === current?.laneId),
+    );
+    const cards = (lane) => Array.from(lane.querySelectorAll(".card"));
+    const inLane = cards(lanes[laneIndex]);
+    const cardIndex = inLane.findIndex((card) =>
+      card.dataset.taskId === current?.taskId
+    );
+    const focus = (card) => {
+      card?.focus();
+      card?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    };
+    let target;
+    if (event.key === "j" || event.key === "k") {
+      target = inLane[
+        Math.max(
+          0,
+          Math.min(
+            inLane.length - 1,
+            cardIndex + (event.key === "j" ? 1 : -1),
+          ),
+        )
+      ];
+    } else if (event.key === "h" || event.key === "l") {
+      const step = event.key === "h" ? -1 : 1;
+      for (let i = laneIndex + step; i >= 0 && i < lanes.length; i += step) {
+        const neighboring = cards(lanes[i]);
+        if (neighboring.length) {
+          target = neighboring[
+            Math.max(0, Math.min(cardIndex, neighboring.length - 1))
+          ];
+          break;
+        }
+      }
+    } else if (event.key === "g") {
+      if (Date.now() - lastG < 700) target = inLane[0];
+      lastG = Date.now();
+    } else if (event.key === "G") {
+      target = inLane.at(-1);
+    } else if (event.key === "a" || event.key === "i") {
+      event.preventDefault();
+      lanes[laneIndex]?.querySelector(".add-row input")?.focus();
+      return;
+    } else if (
+      event.key === "d" && current?.taskId &&
+      document.activeElement?.classList.contains("card")
+    ) {
+      event.preventDefault();
+      void run(async () => {
+        const latest = (await api.getTasks()).find((entry) =>
+          entry.id === current.taskId && entry.projectId === state.ctx?.id
+        );
+        if (!latest) throw new Error("Task changed or left this project.");
+        await api.updateTask(latest.id, { isDone: !latest.isDone });
+      });
+      return;
+    } else if (event.key === "?" || (event.key === "Escape" && state.help)) {
+      event.preventDefault();
+      state.help = event.key === "?" ? !state.help : false;
+      render();
+      return;
+    } else return;
+    if (target || event.key === "g") event.preventDefault();
+    focus(target);
   });
   void loadProject().catch((error) => {
     app.textContent = `Could not load Project Kanban: ${String(error)}`;

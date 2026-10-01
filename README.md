@@ -31,7 +31,9 @@ In **Configure lanes**, add or create tags, give lanes local display names, reor
 
 Drag cards between lanes, or above/below another card to reorder tasks inside a lane. This order is stored by the plugin per project and template; it does not reorder the native task list. Click anywhere on a card (or focus it and press Enter/Space) to open native task details for tags, scheduling, estimates and completion. To move a task to a different tag lane from the sidebar, remove its old lane tag as well as adding the new one; drag-and-drop handles this automatically. When present, a right-aligned calendar/date (or clock/time for today) and time estimate follow the app's Boards card style; hover the schedule for its full date and time. Subtasks appear, but must be moved from their parent/native details.
 
-Native task-row shortcuts such as `Shift+T` (move the focused task to Today) are not available while the Kanban iframe has focus: its cards are not native task rows. Use native task details or switch back to List for those actions. The plugin does not intercept or recreate native task shortcuts.
+Native task-row shortcuts such as `Shift+T` (move the focused task to Today) are not available while the Kanban iframe has focus: its cards are not native task rows. Use native task details or switch back to List for those actions. The plugin does not forward native task-row shortcuts into the iframe.
+
+**Keyboard navigation on the board:** Focus a card, then use `j`/`k` for the next/previous card in its lane, `h`/`l` for the nearest card in the previous/next nonempty lane, `gg`/`G` for the first/last card in the lane, and Enter/Space for native task details. `a` or `i` focuses that lane’s add input; Escape returns to the card (if autocomplete is open, press Escape twice). `d` toggles completion of the focused card; in Workflow, completing it hides it from the board. Press `?` for a small on-demand reminder. These keys work only inside the board and never while typing in a field or editing lane settings. Focus is restored after board refresh when possible, and after adding a task it returns to that lane’s input. Native shortcuts such as `Shift+T` are still not forwarded into the iframe.
 
 **Add tasks in a lane:** Use the single input and press Enter. Shortcuts remain visible and editable in the input until you submit:
 
@@ -52,7 +54,7 @@ deno test --allow-read tests/
 python3 build.py
 ```
 
-Install `dist/project-kanban.zip` using the instructions above. The ZIP contains `manifest.json`, `plugin.js`, and a self-contained `index.html` at its root. The [CI workflow](.github/workflows/release.yml) runs these checks on pushes and pull requests, uploads a short-lived build artifact, and publishes the ZIP as a GitHub Release when a version tag such as `v0.4.2` is pushed. Tags must match `src/manifest.json`'s version.
+Install `dist/project-kanban.zip` using the instructions above. The ZIP contains `manifest.json`, `plugin.js`, and a self-contained `index.html` at its root. The [CI workflow](.github/workflows/release.yml) runs these checks on pushes and pull requests, uploads a short-lived build artifact, and publishes the ZIP as a GitHub Release when a version tag such as `v0.5.0` is pushed. Tags must match `src/manifest.json`'s version.
 
 ## Verify on a disposable project
 
@@ -65,6 +67,7 @@ Install `dist/project-kanban.zip` using the instructions above. The ZIP contains
 7. Type `@tom` and select tomorrow with Enter, then press Enter again to add the task. Try `@in 1` for a timed suggestion. Verify typing `@every friday` or an unknown `#` tag fails visibly rather than creating a task.
 8. Click a card and press Enter/Space on a focused card; each should open native task details without a separate ⋯ menu. Change its tags or mark it complete there and verify the board refreshes.
 9. Assign `Ctrl+Alt+K` to the plugin shortcut in Keyboard Settings, toggle into Kanban from List, then use the same chord while focused on a card to return to List. Typing in the inline task field should not trigger the board shortcut.
+10. Focus a card and use `j/k`, `h/l`, `gg/G`, `a` (or `i`), Escape, `d`, and `?`. Verify navigation follows the visible card order, input typing is unaffected, and completing a card refreshes the board without losing keyboard focus.
 
 ## Limits
 

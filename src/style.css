@@ -72,6 +72,11 @@ select:focus-visible,
 .status.error {
   color: var(--c-warn, #bb2828);
 }
+.keyboard-help {
+  margin: 0 0 var(--s, 8px);
+  color: var(--text-color-muted, #777);
+  font-size: .85rem;
+}
 .board {
   display: flex;
   gap: var(--s, 8px);

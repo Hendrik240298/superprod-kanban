@@ -8,7 +8,13 @@ class Node {
     this.attributes = {};
     this.textContent = "";
     this.className = "";
-    this.classList = { add() {}, remove() {}, toggle() {} };
+    this.classList = {
+      add() {},
+      remove() {},
+      toggle() {},
+      contains: (name) => this.className.split(" ").includes(name),
+    };
+    this.dataset = {};
     this.offsetHeight = 100;
   }
   append(...nodes) {
@@ -35,7 +41,33 @@ class Node {
   fire(key, event = {}) {
     this.listeners[key]?.(event);
   }
-  focus() {}
+  focus() {
+    Node.activeElement = this;
+    this.fire("focus");
+  }
+  querySelectorAll(selector) {
+    const [parent, child] = selector.split(" ");
+    const match = (node, part) =>
+      part.startsWith(".")
+        ? node.className.split(" ").includes(part.slice(1))
+        : node.tag === part;
+    return descendants(
+      this,
+      (node) =>
+        node !== this && match(node, child || parent) &&
+        (!child || descendants(this, (ancestor) =>
+          ancestor !== node && match(ancestor, parent) &&
+          descendants(ancestor, (entry) =>
+            entry === node).length).length),
+    );
+  }
+  querySelector(selector) {
+    return this.querySelectorAll(selector)[0] || null;
+  }
+  closest(selector) {
+    return selector.split(", ").includes(this.tag) ? this : null;
+  }
+  scrollIntoView() {}
   setSelectionRange(start, end) {
     this.selectionStart = start;
     this.selectionEnd = end;
@@ -64,7 +96,16 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   const documentListeners = new Map();
   const document = {
     createElement: (tag) => new Node(tag),
-    addEventListener: (key, fn) => documentListeners.set(key, fn),
+    addEventListener: (key, fn) =>
+      documentListeners.set(key, [
+        ...(documentListeners.get(key) || []),
+        fn,
+      ]),
+    querySelectorAll: (selector) => app.querySelectorAll(selector),
+    querySelector: (selector) => app.querySelector(selector),
+    get activeElement() {
+      return Node.activeElement;
+    },
     getElementById: (id) =>
       descendants(app, (node) => node.id === id)[0] || null,
   };
@@ -239,6 +280,10 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   if (values.has("view-p")) {
     throw new Error("Board settings must not switch work views");
   }
+  descendants(
+    app,
+    (node) => node.tag === "button" && node.textContent === "Close settings",
+  )[0].fire("click");
   const currentCards = descendants(app, (node) => node.tag === "article");
   if (
     currentCards.length !== 2 ||
@@ -253,6 +298,44 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
     throw new Error(
       "Cards should open task details without extra action menus",
     );
+  }
+  const key = (target, key) => {
+    for (const fn of documentListeners.get("keydown") || []) {
+      fn({ key, target, preventDefault() {} });
+    }
+  };
+  currentCards[0].focus();
+  key(currentCards[0], "j");
+  if (document.activeElement !== currentCards[1]) {
+    throw new Error("j did not focus next card");
+  }
+  key(currentCards[1], "k");
+  if (document.activeElement !== currentCards[0]) {
+    throw new Error("k did not focus previous card");
+  }
+  key(currentCards[0], "G");
+  if (document.activeElement !== currentCards[1]) {
+    throw new Error("G did not focus last card");
+  }
+  key(currentCards[1], "g");
+  key(currentCards[1], "g");
+  if (document.activeElement !== currentCards[0]) {
+    throw new Error("gg did not focus first card");
+  }
+  key(currentCards[0], "a");
+  if (document.activeElement?.tag !== "input") {
+    throw new Error("a did not focus quick add");
+  }
+  key(document.activeElement, "j");
+  if (document.activeElement?.tag !== "input") {
+    throw new Error("Navigation stole a typing key");
+  }
+  document.activeElement.fire("keydown", {
+    key: "Escape",
+    preventDefault() {},
+  });
+  if (document.activeElement !== currentCards[0]) {
+    throw new Error("Escape did not restore card focus");
   }
   currentCards[0].fire("click");
   currentCards[1].fire("keydown", { key: "Enter", preventDefault() {} });
@@ -272,6 +355,52 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   if (descendants(app, (node) => node.tag === "article").length !== 1) {
     throw new Error(
       "Completion in native task details should hide the card from Workflow",
+    );
+  }
+  tasks.push({
+    id: "c",
+    title: "In Doing",
+    projectId: "p",
+    tagIds: [tags.find((tag) => tag.title === "Doing").id],
+    isDone: false,
+  });
+  hooks.get("anyTaskUpdate")();
+  await new Promise((resolve) => setTimeout(resolve, 220));
+  await flush();
+  const taskCard = (id) =>
+    descendants(
+      app,
+      (node) => node.tag === "article" && node.dataset.taskId === id,
+    )[0];
+  taskCard("a").focus();
+  key(taskCard("a"), "l");
+  if (document.activeElement !== taskCard("c")) {
+    throw new Error("l did not cross empty lanes");
+  }
+  key(taskCard("c"), "h");
+  if (document.activeElement !== taskCard("a")) {
+    throw new Error("h did not return to Clarify");
+  }
+  key(taskCard("a"), "?");
+  if (!descendants(app, (node) => node.className === "keyboard-help").length) {
+    throw new Error("? did not reveal keyboard help");
+  }
+  key(document.activeElement, "Escape");
+  if (descendants(app, (node) => node.className === "keyboard-help").length) {
+    throw new Error("Escape did not hide keyboard help");
+  }
+  taskCard("c").focus();
+  key(taskCard("c"), "d");
+  await flush();
+  if (
+    !updates.some(({ id, patch }) => id === "c" && patch.isDone === true) ||
+    taskCard("c")
+  ) {
+    throw new Error("d did not complete the focused card");
+  }
+  if (document.activeElement !== taskCard("a")) {
+    throw new Error(
+      "Completion lost keyboard focus instead of returning to a card",
     );
   }
   const form = () =>
@@ -327,6 +456,9 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   }
   type(firstForm, "Write report #Extra @2026-10-22 14:30 1h 30m");
   await submit(firstForm);
+  if (document.activeElement !== titleInput(form())) {
+    throw new Error("Quick add did not return focus to its lane input");
+  }
   if (
     added.length !== 1 || added[0].title !== "Write report" ||
     added[0].projectId !== "p" ||
@@ -439,15 +571,17 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   }
   if (!hooks.has("anyTaskUpdate")) throw new Error("Task refresh hook missing");
   const boardKeydown = documentListeners.get("keydown");
-  if (!boardKeydown) throw new Error("Board exit shortcut missing");
+  if (!boardKeydown?.length) throw new Error("Board exit shortcut missing");
   const chord = (target) =>
-    boardKeydown({
-      key: "k",
-      ctrlKey: true,
-      altKey: true,
-      target,
-      preventDefault() {},
-    });
+    boardKeydown.forEach((fn) =>
+      fn({
+        key: "k",
+        ctrlKey: true,
+        altKey: true,
+        target,
+        preventDefault() {},
+      })
+    );
   chord({ closest: () => ({ tag: "input" }) });
   if (closed.length || values.has("view-p")) {
     throw new Error("Board shortcut stole a key while typing");
