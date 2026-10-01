@@ -1,7 +1,7 @@
 {
   "id": "project-kanban",
   "name": "Project Kanban",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "A tag-based Kanban view inside each Super Productivity project.",
   "manifestVersion": 1,
   "minSupVersion": "18.7.0",

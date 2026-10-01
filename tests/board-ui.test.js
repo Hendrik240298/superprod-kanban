@@ -284,6 +284,35 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
     app,
     (node) => node.tag === "button" && node.textContent === "Close settings",
   )[0].fire("click");
+  const key = (target, key, shiftKey = false) => {
+    for (const fn of documentListeners.get("keydown") || []) {
+      fn({ key, shiftKey, target, preventDefault() {} });
+    }
+  };
+  const cardById = (id) =>
+    descendants(
+      app,
+      (node) => node.tag === "article" && node.dataset.taskId === id,
+    )[0];
+  cardById("a").focus();
+  key(cardById("a"), "K", true);
+  await flush();
+  if (
+    JSON.stringify(JSON.parse(values.get("order-workflow-p")).todo) !==
+      JSON.stringify(["a", "b"])
+  ) {
+    throw new Error("Shift+K did not move the card up");
+  }
+  key(cardById("a"), "J", true);
+  await flush();
+  if (
+    JSON.stringify(JSON.parse(values.get("order-workflow-p")).todo) !==
+      JSON.stringify(["b", "a"]) || updates.length
+  ) {
+    throw new Error(
+      "Shift+J did not move the card down without changing task data",
+    );
+  }
   const currentCards = descendants(app, (node) => node.tag === "article");
   if (
     currentCards.length !== 2 ||
@@ -299,11 +328,6 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
       "Cards should open task details without extra action menus",
     );
   }
-  const key = (target, key) => {
-    for (const fn of documentListeners.get("keydown") || []) {
-      fn({ key, target, preventDefault() {} });
-    }
-  };
   currentCards[0].focus();
   key(currentCards[0], "j");
   if (document.activeElement !== currentCards[1]) {
@@ -347,6 +371,55 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   ) {
     throw new Error("Opening card details should not modify the task");
   }
+  const editCard = currentCards[1];
+  const edit = () =>
+    editCard.fire("keydown", {
+      key: "e",
+      target: editCard,
+      preventDefault() {},
+    });
+  const titleEdit =
+    descendants(editCard, (node) => node.className === "card-title-input")[0];
+  editCard.focus();
+  edit();
+  if (document.activeElement !== titleEdit || titleEdit.value !== "First") {
+    throw new Error("e did not enter inline title editing");
+  }
+  titleEdit.value = "Discarded";
+  titleEdit.fire("keydown", {
+    key: "Escape",
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  if (tasks[0].title !== "First" || document.activeElement !== editCard) {
+    throw new Error(
+      "Escape did not cancel title editing and return to the card",
+    );
+  }
+  edit();
+  titleEdit.value = "  ";
+  titleEdit.fire("keydown", {
+    key: "Enter",
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  if (titleEdit.hidden || updates.length) {
+    throw new Error("Empty title was accepted");
+  }
+  titleEdit.value = "Renamed";
+  titleEdit.fire("keydown", {
+    key: "Enter",
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  await flush();
+  if (
+    tasks[0].title !== "Renamed" ||
+    !updates.some(({ id, patch }) => id === "a" && patch.title === "Renamed") ||
+    document.activeElement?.dataset.taskId !== "a"
+  ) {
+    throw new Error("Enter did not save the new title and restore card focus");
+  }
   // Edits and completion happen in native details; the host hook refreshes the board.
   tasks.find((task) => task.id === "b").isDone = true;
   hooks.get("anyTaskUpdate")();
@@ -380,6 +453,22 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   key(taskCard("c"), "h");
   if (document.activeElement !== taskCard("a")) {
     throw new Error("h did not return to Clarify");
+  }
+  const backlogId = tags.find((tag) => tag.title === "Backlog").id;
+  key(taskCard("a"), "L", true);
+  await flush();
+  if (
+    JSON.stringify(tasks[0].tagIds) !== JSON.stringify([backlogId]) ||
+    document.activeElement !== taskCard("a")
+  ) {
+    throw new Error(
+      "Shift+L did not move the card into the adjacent empty lane",
+    );
+  }
+  key(taskCard("a"), "H", true);
+  await flush();
+  if (tasks[0].tagIds.length || document.activeElement !== taskCard("a")) {
+    throw new Error("Shift+H did not restore the card to Clarify");
   }
   key(taskCard("a"), "?");
   if (!descendants(app, (node) => node.className === "keyboard-help").length) {

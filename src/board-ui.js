@@ -183,7 +183,7 @@
         el(
           "p",
           "keyboard-help",
-          "j/k: next/previous card · h/l: lane · gg/G: first/last · Enter: details · a/i: add · d: toggle done · ?: hide help · Ctrl+Alt+K: List",
+          "j/k: next/previous card · h/l: lane · Shift+H/J/K/L: move card · gg/G: first/last · e: edit title · Enter: details · a/i: add · d: done · ?: help · Ctrl+Alt+K: List",
         ),
       );
     }
@@ -527,6 +527,12 @@
     };
     card.addEventListener("click", openDetails);
     card.addEventListener("keydown", (event) => {
+      if (event.target && event.target !== card) return;
+      if (event.key === "e") {
+        event.preventDefault();
+        startEditing();
+        return;
+      }
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
         openDetails();
@@ -565,7 +571,71 @@
       }
     });
     const heading = el("div", "card-heading");
-    heading.append(el("span", "card-title", task.title || "(Untitled task)"));
+    const title = el("span", "card-title", task.title || "(Untitled task)");
+    const titleInput = el("input", "card-title-input");
+    titleInput.type = "text";
+    titleInput.maxLength = 500;
+    titleInput.hidden = true;
+    titleInput.setAttribute(
+      "aria-label",
+      `Edit title for ${task.title || "Untitled task"}`,
+    );
+    let editing = false;
+    function stopEditing(restoreFocus = true) {
+      if (!editing) return;
+      editing = false;
+      title.hidden = false;
+      titleInput.hidden = true;
+      card.draggable = !task.parentId;
+      if (restoreFocus) card.focus();
+    }
+    function startEditing() {
+      if (editing) return;
+      editing = true;
+      titleInput.value = task.title || "";
+      title.hidden = true;
+      titleInput.hidden = false;
+      card.draggable = false;
+      titleInput.focus();
+      titleInput.setSelectionRange(
+        titleInput.value.length,
+        titleInput.value.length,
+      );
+    }
+    titleInput.addEventListener("click", (event) => event.stopPropagation());
+    titleInput.addEventListener("blur", () => stopEditing(false));
+    titleInput.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === "Escape") {
+        stopEditing();
+        return;
+      }
+      const nextTitle = titleInput.value.trim();
+      if (!nextTitle) {
+        status("Task title cannot be empty.", true);
+        return;
+      }
+      stopEditing();
+      if (nextTitle === task.title) return;
+      void run(async () => {
+        try {
+          const latest = (await api.getTasks()).find((entry) =>
+            entry.id === task.id && entry.projectId === state.ctx?.id
+          );
+          if (!latest) throw new Error("Task changed or left this project.");
+          await api.updateTask(latest.id, { title: nextTitle });
+        } catch (error) {
+          if (state.ctx?.id === task.projectId && card.isConnected) {
+            startEditing();
+            titleInput.value = nextTitle;
+          }
+          throw error;
+        }
+      });
+    });
+    heading.append(title, titleInput);
     const meta = el("div", "card-meta");
     const scheduled = BoardCore.scheduledDate(task);
     if (task.parentId) {
@@ -834,6 +904,38 @@
       card?.focus();
       card?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
     };
+    if (
+      event.shiftKey && ["H", "J", "K", "L"].includes(event.key) &&
+      current?.taskId && document.activeElement?.classList.contains("card")
+    ) {
+      const task = state.tasks.find((entry) => entry.id === current.taskId);
+      if (task?.parentId) {
+        status("Move subtasks in native task details.", true);
+        return;
+      }
+      let destination, beforeId;
+      if (event.key === "H" || event.key === "L") {
+        const index = laneIndex + (event.key === "H" ? -1 : 1);
+        if (index >= 0 && index < lanes.length) {
+          destination = lanes[index].dataset.laneId;
+          beforeId = null;
+        }
+      } else if (event.key === "K" && cardIndex > 0) {
+        destination = current.laneId;
+        beforeId = inLane[cardIndex - 1].dataset.taskId;
+      } else if (
+        event.key === "J" && cardIndex >= 0 &&
+        cardIndex < inLane.length - 1
+      ) {
+        destination = current.laneId;
+        beforeId = inLane[cardIndex + 2]?.dataset.taskId || null;
+      }
+      if (destination) {
+        event.preventDefault();
+        move(current.taskId, destination, beforeId);
+      }
+      return;
+    }
     let target;
     if (event.key === "j" || event.key === "k") {
       target = inLane[

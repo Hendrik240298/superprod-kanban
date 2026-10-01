@@ -145,6 +145,19 @@ select:focus-visible,
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
+.card-title[hidden],
+.card-title-input[hidden] {
+  display: none;
+}
+.card-title-input {
+  min-width: 0;
+  flex: 1;
+  padding: 4px 6px;
+  border: 1px solid var(--c-primary, #7559d9);
+  border-radius: 6px;
+  background: var(--card-bg, #fff);
+  color: inherit;
+}
 .card-heading {
   display: flex;
   flex-wrap: wrap;
