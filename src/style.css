@@ -40,7 +40,6 @@ select:focus-visible,
 }
 .toolbar button,
 .settings button,
-.card button,
 .add-row button {
   border: 1px solid var(--divider-color, #aaa5);
   border-radius: 6px;
@@ -57,8 +56,7 @@ select:focus-visible,
   color: var(--text-color, #292929);
 }
 .toolbar button:hover,
-.settings button:hover,
-.card button:hover {
+.settings button:hover {
   border-color: var(--c-primary, #7559d9);
 }
 .muted {
@@ -123,6 +121,7 @@ select:focus-visible,
   border-radius: 14px;
   background: var(--card-bg, #fff);
   box-shadow: var(--whiteframe-shadow-1dp, 0 1px 4px #0002);
+  cursor: pointer;
 }
 .card[draggable="true"] {
   cursor: grab;
@@ -134,9 +133,6 @@ select:focus-visible,
   border-bottom: 3px solid var(--c-primary, #7559d9);
 }
 .card-title {
-  border: 0 !important;
-  background: none !important;
-  padding: 0 !important;
   min-width: 0;
   flex: 1;
   text-align: left;
@@ -234,45 +230,6 @@ select:focus-visible,
   padding: 3px 8px;
   font-size: .75rem;
   line-height: 1.4;
-}
-.card-actions {
-  color: var(--text-color-muted, #777);
-  font-size: .85rem;
-}
-.card-actions summary {
-  cursor: pointer;
-  width: max-content;
-  list-style: none;
-  padding: 0 5px;
-  border-radius: 6px;
-}
-.card-actions summary::-webkit-details-marker {
-  display: none;
-}
-.card-actions summary:hover {
-  background: var(--bg-darker, #efefef);
-}
-.card-actions[open] {
-  flex: 0 0 100%;
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  align-items: center;
-  margin-top: 4px;
-  padding-top: 4px;
-  border-top: 1px solid var(--divider-color, #aaa5);
-}
-.card-actions[open] summary {
-  width: 100%;
-}
-.card-actions label {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.card-actions select {
-  min-width: 0;
-  max-width: 180px;
 }
 .add-row {
   display: flex;

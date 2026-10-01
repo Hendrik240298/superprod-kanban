@@ -180,14 +180,14 @@
     );
     for (const column of columns) {
       board.append(
-        renderLane(column, grouped.get(column.tagId || column.kind), columns),
+        renderLane(column, grouped.get(column.tagId || column.kind)),
       );
     }
     shell.append(board);
     app.replaceChildren(shell);
   }
 
-  function renderLane(lane, tasks, columns) {
+  function renderLane(lane, tasks) {
     const id = lane.tagId || lane.kind;
     const section = el("section", "lane");
     section.setAttribute("aria-label", lane.label);
@@ -199,7 +199,7 @@
     section.append(header);
     const cards = el("div", "cards");
     for (const [index, task] of tasks.entries()) {
-      cards.append(renderCard(task, id, columns, tasks[index + 1]?.id || null));
+      cards.append(renderCard(task, id, tasks[index + 1]?.id || null));
     }
     if (!tasks.length) cards.append(el("p", "muted empty", "No tasks"));
     section.append(cards);
@@ -451,8 +451,26 @@
     return form;
   }
 
-  function renderCard(task, currentLane, columns, nextCardId) {
+  function renderCard(task, currentLane, nextCardId) {
     const card = el("article", "card");
+    card.setAttribute("role", "button");
+    card.tabIndex = 0;
+    card.setAttribute(
+      "aria-label",
+      `Open details for ${task.title || "Untitled task"}`,
+    );
+    const openDetails = () => {
+      void api.selectTask(task.id).catch((error) =>
+        status(String(error), true)
+      );
+    };
+    card.addEventListener("click", openDetails);
+    card.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openDetails();
+      }
+    });
     const movable = !task.parentId;
     card.draggable = movable;
     if (movable) {
@@ -486,13 +504,7 @@
       }
     });
     const heading = el("div", "card-heading");
-    const title = control(task.title || "(Untitled task)", () => {
-      void api.selectTask(task.id).catch((error) =>
-        status(String(error), true)
-      );
-    }, "card-title");
-    title.title = "Open task details";
-    heading.append(title);
+    heading.append(el("span", "card-title", task.title || "(Untitled task)"));
     const meta = el("div", "card-meta");
     const scheduled = BoardCore.scheduledDate(task);
     if (task.parentId) {
@@ -506,38 +518,6 @@
       meta.append(
         el("span", "meta-chip", `${task.subTaskIds.length} subtasks`),
       );
-    }
-    if (movable) {
-      const controls = el("details", "card-actions");
-      const summary = el("summary", "", "⋯");
-      summary.setAttribute("aria-label", `Actions for ${task.title}`);
-      controls.append(summary);
-      const label = el("label", "", "Move to");
-      const select = el("select");
-      select.setAttribute("aria-label", `Move ${task.title} to lane`);
-      for (const lane of columns) {
-        const option = el("option", "", lane.label);
-        option.value = lane.tagId || lane.kind;
-        select.append(option);
-      }
-      select.value = currentLane;
-      select.addEventListener("change", () => void move(task.id, select.value));
-      label.append(select);
-      controls.append(label);
-      if (state.template === "workflow") {
-        controls.append(control("Complete", () =>
-          void run(async () => {
-            const latest = (await api.getTasks()).find((entry) =>
-              entry.id === task.id && entry.projectId === state.ctx?.id
-            );
-            if (!latest) throw new Error("Task changed or left this project.");
-            await api.updateTask(
-              task.id,
-              BoardCore.movePatch(latest, "done", state.config),
-            );
-          })));
-      }
-      heading.append(controls);
     }
     const estimate = BoardCore.estimateLabel(task.timeEstimate);
     if (estimate) {
@@ -578,7 +558,7 @@
     return card;
   }
 
-  // beforeId=undefined means a selector change; null means append on drop.
+  // null means append on drop; a task ID inserts before that card.
   function move(taskId, laneId, beforeId) {
     const task = state.tasks.find((entry) =>
       entry.id === taskId && entry.projectId === state.ctx?.id
@@ -599,16 +579,10 @@
         state.config,
         state.template,
       );
-      const currentLane = BoardCore.laneFor(
-        latest,
-        state.config,
-        state.template,
-      );
       const changes =
         JSON.stringify(patch.tagIds) !== JSON.stringify(latest.tagIds || []) ||
         patch.isDone !== latest.isDone;
       if (changes) await api.updateTask(taskId, patch);
-      if (currentLane === laneId && beforeId === undefined) return;
       const grouped = BoardCore.orderCards(
         BoardCore.projectCards(
           state.tasks,

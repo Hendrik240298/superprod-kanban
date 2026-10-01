@@ -93,6 +93,7 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   ];
   const updates = [];
   const added = [];
+  const selected = [];
   const errors = [];
   const hooks = new Map();
   const api = {
@@ -129,7 +130,9 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
       tasks.push({ id, ...fields });
       return id;
     },
-    selectTask: async () => {},
+    selectTask: async (id) => {
+      selected.push(id);
+    },
     log: { err: () => {} },
   };
   new Function("window", "document", "BoardCore", "console", source)(
@@ -232,21 +235,40 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   if (values.has("view-p")) {
     throw new Error("Board settings must not switch work views");
   }
-  const actions = descendants(app, (node) => node.tag === "details");
-  if (actions.length !== 2) {
-    throw new Error("Expected compact card action menus");
+  const currentCards = descendants(app, (node) => node.tag === "article");
+  if (
+    currentCards.length !== 2 ||
+    currentCards.some((card) =>
+      card.attributes.role !== "button" || card.tabIndex !== 0 ||
+      descendants(
+        card,
+        (node) => node.tag === "details" || node.tag === "button",
+      ).length
+    )
+  ) {
+    throw new Error(
+      "Cards should open task details without extra action menus",
+    );
   }
-  const complete = descendants(
-    actions[0],
-    (node) => node.tag === "button" && node.textContent === "Complete",
-  )[0];
-  complete.fire("click");
+  currentCards[0].fire("click");
+  currentCards[1].fire("keydown", { key: "Enter", preventDefault() {} });
+  currentCards[0].fire("keydown", { key: " ", preventDefault() {} });
   await flush();
-  if (updates.length !== 1 || updates[0].patch.isDone !== true) {
-    throw new Error("Workflow completion did not update the task state");
+  if (
+    JSON.stringify(selected) !== JSON.stringify(["b", "a", "b"]) ||
+    updates.length
+  ) {
+    throw new Error("Opening card details should not modify the task");
   }
+  // Edits and completion happen in native details; the host hook refreshes the board.
+  tasks.find((task) => task.id === "b").isDone = true;
+  hooks.get("anyTaskUpdate")();
+  await new Promise((resolve) => setTimeout(resolve, 220));
+  await flush();
   if (descendants(app, (node) => node.tag === "article").length !== 1) {
-    throw new Error("Completed task should be hidden from Workflow");
+    throw new Error(
+      "Completion in native task details should hide the card from Workflow",
+    );
   }
   const form = () =>
     descendants(
