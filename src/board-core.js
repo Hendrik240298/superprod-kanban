@@ -10,6 +10,7 @@ const BoardCore = (() => {
     "Scheduled",
     "Maybe/Later",
   ];
+  const SIMPLE_TAGS = ["Backlog", "Doing"];
   const DATE_SUGGESTIONS = [
     "today",
     "tomorrow",
@@ -285,6 +286,12 @@ const BoardCore = (() => {
 
   function columns(config, tags, template = "classic") {
     const tagById = new Map(tags.map((tag) => [tag.id, tag]));
+    if (template === "simple") {
+      return config.lanes.map((lane) => ({
+        ...lane,
+        label: tagById.get(lane.tagId)?.title || "Tag",
+      }));
+    }
     return [
       template === "workflow" ? { ...fallback, label: "Clarify" } : fallback,
       ...config.lanes.map((lane) => ({
@@ -296,19 +303,29 @@ const BoardCore = (() => {
   }
 
   function laneFor(task, config, template = "classic") {
+    if (template === "simple") {
+      if (task.isDone) return null;
+      // Untagged and old In Progress tasks remain visible in Backlog.
+      const doing = config.lanes[1]?.tagId;
+      return doing && task.tagIds?.includes(doing)
+        ? doing
+        : config.lanes[0]?.tagId || null;
+    }
     if (task.isDone) return template === "workflow" ? null : "done";
     const ids = new Set(task.tagIds || []);
     return config.lanes.find((lane) => ids.has(lane.tagId))?.tagId || "todo";
   }
 
   function projectCards(tasks, projectId, config, template = "classic") {
-    const grouped = new Map([
-      ["todo", []],
-      ...config.lanes.map((lane) => [lane.tagId, []]),
-      ...(template === "workflow" ? [] : [["done", []]]),
-    ]);
+    const grouped = new Map(
+      template === "simple" ? config.lanes.map((lane) => [lane.tagId, []]) : [
+        ["todo", []],
+        ...config.lanes.map((lane) => [lane.tagId, []]),
+        ...(template === "workflow" ? [] : [["done", []]]),
+      ],
+    );
     for (const task of tasks) {
-      if (task.projectId !== projectId) continue;
+      if (task.projectId !== projectId || task.parentId) continue;
       const lane = laneFor(task, config, template);
       if (lane) grouped.get(lane).push(task);
     }
@@ -316,6 +333,19 @@ const BoardCore = (() => {
   }
 
   function movePatch(task, target, config, template = "classic") {
+    if (template === "simple") {
+      if (!config.lanes.some((lane) => lane.tagId === target)) {
+        throw new Error("Unknown destination lane");
+      }
+      const laneIds = new Set(config.lanes.map((lane) => lane.tagId));
+      return {
+        tagIds: [
+          ...new Set((task.tagIds || []).filter((id) => !laneIds.has(id))),
+          target,
+        ],
+        isDone: false,
+      };
+    }
     if (
       target !== "todo" && (target !== "done" || template === "workflow") &&
       !config.lanes.some((lane) => lane.tagId === target)
@@ -386,6 +416,7 @@ const BoardCore = (() => {
   }
 
   return {
+    SIMPLE_TAGS,
     WORKFLOW_TAGS,
     dateSuggestions,
     resolveDateSuggestion,

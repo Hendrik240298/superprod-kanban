@@ -22,20 +22,41 @@ Choose a template under **Configure lanes**:
 
 | Template | Lanes | Completed tasks |
 | --- | --- | --- |
-| Classic | To Do, In Progress, Done | Shown in Done (real task completion, not a tag) |
+| Simple | Backlog, Doing | Hidden, not deleted |
 | Workflow | Clarify, Backlog, This Week, Doing, Waiting, Scheduled, Maybe/Later | Hidden from this board, not deleted |
 
-To Do/Clarify is the fallback for unfinished tasks without a configured lane tag. The remaining Workflow lanes are **ordinary tags**: moving a task into the Scheduled lane does *not* schedule it in Super Productivity. Switching templates preserves each template's project-specific lane configuration. Tags themselves are shared across the app; the Workflow template reuses matching tag names or creates them when first selected.
+Simple uses the same **Backlog** and **Doing** tags as Workflow. Untagged tasks (including tasks left with the old In Progress tag) appear in Backlog; moving a card into either lane assigns that lane's tag. The old In Progress tag is not removed or bulk-migrated. Clarify is the Workflow fallback for unfinished tasks without a configured lane tag. The remaining Workflow lanes are **ordinary tags**: moving a task into the Scheduled lane does *not* schedule it in Super Productivity. Switching templates preserves Workflow's project-specific lane configuration. Tags themselves are shared across the app; matching tag names are reused or created on first use. Existing Classic settings and order are not deleted, but the former three-lane board now opens as Simple.
 
-In **Configure lanes**, add or create tags, give lanes local display names, reorder tag lanes, or remove them without deleting tasks or tags. To Do/Clarify stays first, and Done stays last in Classic.
+In **Configure lanes**, select a template. For Workflow, you can also add or create tags, give lanes local display names, reorder tag lanes, or remove them without deleting tasks or tags. Clarify stays first. Simple's two lanes are fixed so they stay consistent with Workflow's tags.
 
-Drag cards between lanes, or above/below another card to reorder tasks inside a lane. This order is stored by the plugin per project and template; it does not reorder the native task list. Click anywhere on a card (or focus it and press Enter/Space) to open native task details for tags, scheduling, estimates and completion. To move a task to a different tag lane from the sidebar, remove its old lane tag as well as adding the new one; drag-and-drop handles this automatically. When present, a right-aligned calendar/date (or clock/time for today) and time estimate follow the app's Boards card style; hover the schedule for its full date and time. Subtasks appear, but must be moved from their parent/native details.
+Drag cards between lanes, or above/below another card to reorder tasks inside a lane. This order is stored by the plugin per project and template; it does not reorder the native task list. Click anywhere on a card (or focus it and press Enter/Space) to open native task details for tags, scheduling, estimates and completion. To move a task to a different tag lane from the sidebar, remove its old lane tag as well as adding the new one; drag-and-drop handles this automatically. When present, a right-aligned calendar/date (or clock/time for today) and time estimate follow the app's Boards card style; hover the schedule for its full date and time. **Subtasks do not get separate cards**; their parent card retains the subtask-count chip, and opening the parent shows its subtasks in native task details.
 
 Native task-row shortcuts such as `Shift+T` (move the focused task to Today) are not available while the Kanban iframe has focus: its cards are not native task rows. Use native task details or switch back to List for those actions. The plugin does not forward native task-row shortcuts into the iframe.
 
 **Keyboard focus on the board:** On opening Kanban, the board itself is focused. Press `j` to focus the first card. From a card, Escape returns to board focus without leaving Kanban; `j` enters card navigation again. This is a focus distinction, not a switch back to the host: Super Productivity’s native shortcuts still do not reach the host while the iframe has focus. `Shift+V` returns to List from board/card focus; `Ctrl+Alt+K` also works while typing. In quick-add, Escape closes suggestions first, then returns to the card, then to board focus.
 
-**Keyboard navigation:** Use `j`/`k` for the next/previous card in its lane, `h`/`l` for the nearest card in the previous/next nonempty lane, and `gg`/`G` for the first/last card in the lane. Hold Shift with `H`/`L` to move the card one lane left/right (including empty lanes), or with `K`/`J` to reorder it up/down within its lane. Moves update lane tags and completion like dragging; subtasks still need native task details. Enter/Space opens native task details. Press `e` to edit the card’s title in place: Enter saves, Escape cancels, and focus returns to the card. `#`, `@`, and duration suggestions also work here (for example, `Review @tomorrow`); selected shortcuts are removed from the title and applied to the task. Existing tags, schedule, and estimate remain unless you explicitly supply a replacement. To *remove* metadata, use native task details. `a` or `i` focuses that lane’s add input; `d` toggles completion of the focused card. Press `?` for a small on-demand reminder. Navigation keys never act while typing in a field or editing lane settings. Focus is restored after board refresh when possible, and after adding a task it returns to that lane’s input.
+**Keyboard navigation:** Use `j`/`k` for the next/previous card in its lane, `h`/`l` for the nearest card in the previous/next nonempty lane, and `gg`/`G` for the first/last card in the lane. Hold Shift with `H`/`L` to move the card one lane left/right (including empty lanes), or with `K`/`J` to reorder it up/down within its lane. Moves update lane tags like dragging; subtasks still need native task details. Enter/Space opens native task details. Press `e` to edit the card’s title in place: Enter saves, Escape cancels, and focus returns to the card. `#`, `@`, and duration suggestions also work here (for example, `Review @tomorrow`); selected shortcuts are removed from the title and applied to the task. Existing tags, schedule, and estimate remain unless you explicitly supply a replacement. To *remove* metadata, use native task details. `a` or `i` focuses that lane’s add input; `d` finishes the focused card. Press `?` for a small on-demand reminder. Navigation keys never act while typing in a field or editing lane settings. Focus is restored after board refresh when possible, and after adding a task it returns to that lane’s input.
+
+### Keyboard shortcuts
+
+| Keys | Action |
+| --- | --- |
+| `j` from board focus | Focus the first card |
+| `j` / `k` | Next / previous card in the lane |
+| `h` / `l` | Nearest card in the previous / next nonempty lane |
+| `gg` / `G` | First / last card in the lane |
+| `Shift+H` / `Shift+L` | Move the focused card to the previous / next lane |
+| `Shift+K` / `Shift+J` | Move the focused card up / down in its lane |
+| `d` | **Finish** the focused task (`isDone`); it disappears from both boards. Reopen it in List/native details to undo. |
+| `Enter` / `Space` | Open the focused task in native details (including its subtasks) |
+| `e` | Edit the focused card inline; Enter saves, Escape cancels |
+| `a` / `i` | Focus that lane's quick-add input |
+| `Escape` | From a card, return to board focus; in quick-add, close suggestions first |
+| `?` | Show/hide the on-board shortcut hint |
+| `Shift+V` | Return to List (when not typing; assign the same binding in Settings → Keyboard) |
+| `Ctrl+Alt+K` | Return to List, including while typing (except AltGr) |
+
+Keyboard navigation works within Kanban only, and does not intercept text typed in an input. Finishing a task does not delete it.
 
 **Add tasks in a lane:** Use the single input and press Enter. Shortcuts remain visible and editable in the input until you submit:
 
@@ -56,14 +77,14 @@ deno test --allow-read tests/
 python3 build.py
 ```
 
-Install `dist/project-kanban.zip` using the instructions above. The ZIP contains `manifest.json`, `plugin.js`, and a self-contained `index.html` at its root. The [CI workflow](.github/workflows/release.yml) runs these checks on pushes and pull requests, uploads a short-lived build artifact, and publishes the ZIP as a GitHub Release when a version tag such as `v0.6.2` is pushed. Tags must match `src/manifest.json`'s version.
+Install `dist/project-kanban.zip` using the instructions above. The ZIP contains `manifest.json`, `plugin.js`, and a self-contained `index.html` at its root. The [CI workflow](.github/workflows/release.yml) runs these checks on pushes and pull requests, uploads a short-lived build artifact, and publishes the ZIP as a GitHub Release when a version tag such as `v0.6.3` is pushed. Tags must match `src/manifest.json`'s version.
 
 ## Verify on a disposable project
 
 1. Make projects A and B. Choose Kanban for A and leave B on List. Switch A → B → A and restart; both should retain their views.
-2. Add a task in each lane of A and verify every task belongs to A rather than Inbox/B. Move an existing task with an unrelated tag through each lane and check the tag survives; Done must actually complete it.
+2. Add a task in each lane of A and verify every task belongs to A rather than Inbox/B. Move an existing task with an unrelated tag through each lane and check the tag survives; press `d` to complete it and check it disappears while remaining in the native task list.
 3. Create another lane from a tag, rename its **local label**, reorder it, and remove it. Check tasks remain visible in the fallback lane and the global tag name remains unchanged. Try dragging two tasks within a lane and reopening the board to verify their order.
-4. Check a project with backlog items and subtasks; both are identified, and the native task detail still opens.
+4. Check a project with backlog items and subtasks; only parent cards are shown, each with a subtask count. Open the parent to see subtasks in native task details.
 5. Set an all-day schedule, a timed schedule, and a time estimate in native task details; check the board indicators and updates after editing the task.
 6. In a lane's single input, type `Write report #Extra @2026-10-22 14:30 1h 30m` (with an existing unrelated tag), then submit. Check that the title is `Write report`, the task stays in this project/lane, and native details show the tag, timed schedule, and estimate.
 7. Type `@tom` and select tomorrow with Enter, then press Enter again to add the task. Try `@in 1` for a timed suggestion. Verify typing `@every friday` or an unknown `#` tag fails visibly rather than creating a task.
@@ -72,13 +93,14 @@ Install `dist/project-kanban.zip` using the instructions above. The ZIP contains
 10. Focus a card and use `j/k`, `h/l`, `gg/G`, `a` (or `i`), Escape, `d`, and `?`. Verify navigation follows the visible card order, input typing is unaffected, and completing a card refreshes the board without losing keyboard focus.
 11. Focus a card, press `e`, type `@tom`, accept `@tomorrow` with Enter, then press Enter again to save. Check the native due date changed without erasing existing tags or estimate; try `#` tags and a duration too. Escape cancels; an unsupported `@` expression must show an error without saving. Use Shift+J/K to reorder it within the lane and Shift+H/L to move it between lanes, including an empty lane; verify focus and unrelated tags survive.
 12. From a focused card, press Escape to focus the board without leaving Kanban, then `j` to focus the first card. Repeat after quick-add and across board refreshes; other native app shortcuts will still require leaving the iframe.
+13. Switch from an old Classic board to Simple: old In Progress cards should be visible in Backlog without any automatic tag changes. Move a card to Doing and check that its shared Doing tag is applied; completed tasks should not appear in either lane.
 
 ## Limits
 
 - The embedded iframe uses its own styled cards, not the app's internal Angular Boards component.
 - It does not expose sections, duplicate Boards, or reorder the app's native task list. When no plugin-specific order exists, cards follow the order returned by the plugin task API.
-- The tag-based lane model treats completed tasks as Done even when they retain tags from outside the plugin. Moving a card with multiple configured lane tags resolves the conflict by removing the *configured* lane tags; unrelated tags remain.
-- Cards can be moved and reordered with Shift+H/J/K/L or by dragging. Subtasks still need native task details for moves, and these board-local keys do not change the app's native task-list order.
+- Both boards hide completed tasks, even when they retain tags from outside the plugin. Moving a card with multiple configured lane tags resolves the conflict by removing the *configured* lane tags; unrelated tags remain.
+- Cards can be moved and reordered with Shift+H/J/K/L or by dragging. Subtasks are only accessible through their parent/native details, and these board-local keys do not change the app's native task-list order.
 - Timed scheduling uses a second API call after creating the task. If that call fails, the task still exists; the board reports the failure and you can schedule it in native task details.
 - Integration with a real running Super Productivity instance still needs the manual checks above. Automated tests cover pure lane rules, a mocked iframe flow, and host preference logic; they are not a substitute for app testing.
 

@@ -109,7 +109,11 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
     getElementById: (id) =>
       descendants(app, (node) => node.id === id)[0] || null,
   };
-  const values = new Map();
+  const oldSettings = JSON.stringify({ lanes: [{ tagId: "progress" }] });
+  const values = new Map([
+    ["template-p", "classic"],
+    ["lanes-p", oldSettings],
+  ]);
   const tags = [
     { id: "progress", title: "In Progress" },
     { id: "extra", title: "Extra" },
@@ -124,6 +128,7 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
       isDone: false,
       dueDay: "2026-10-08",
       timeEstimate: 5400000,
+      subTaskIds: ["sub"],
     },
     {
       id: "b",
@@ -132,6 +137,21 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
       tagIds: [],
       isDone: false,
       dueWithTime: new Date(2026, 9, 9, 14, 30).getTime(),
+    },
+    {
+      id: "sub",
+      title: "Child",
+      projectId: "p",
+      parentId: "a",
+      tagIds: [],
+      isDone: false,
+    },
+    {
+      id: "finished",
+      title: "Finished",
+      projectId: "p",
+      tagIds: [],
+      isDone: true,
     },
   ];
   const updates = [];
@@ -191,6 +211,30 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
     throw new Error("Board did not start with a predictable focus target");
   }
   if (
+    values.get("lanes-p") !== oldSettings ||
+    values.get("template-p") !== "classic"
+  ) {
+    throw new Error("Opening legacy Classic changed stored settings");
+  }
+  const simpleLanes = descendants(app, (node) => node.className === "lane");
+  if (
+    JSON.stringify(simpleLanes.map((node) => node.attributes["aria-label"])) !==
+      JSON.stringify(["Backlog", "Doing"]) ||
+    descendants(app, (node) => node.tag === "article").length !== 2 ||
+    !descendants(app, (node) =>
+      node.className === "meta-chip" &&
+      node.textContent === "1 subtasks").length
+  ) {
+    throw new Error(
+      "Simple board must hide completed/subtask cards and keep parent count",
+    );
+  }
+  if (
+    tags.some((tag) => tag.title === "In Progress" && tag.id !== "progress")
+  ) {
+    throw new Error("Simple board created a legacy In Progress tag");
+  }
+  if (
     descendants(
       app,
       (node) => node.tag === "h1" || node.textContent === "List view",
@@ -247,9 +291,9 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
     descendants(
         app,
         (node) => node.tag === "section" && node.className === "lane",
-      ).length !== 3
+      ).length !== 2
   ) {
-    throw new Error("Classic board did not render");
+    throw new Error("Simple board did not render");
   }
   picker.value = "workflow";
   picker.fire("change");
@@ -803,6 +847,23 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
     preventDefault() {},
     stopPropagation() {},
   });
+  const finishCard = descendants(
+    app,
+    (node) => node.tag === "article" && node.dataset.taskId === "a",
+  )[0];
+  finishCard.focus();
+  key(finishCard, "d");
+  await flush();
+  if (
+    !tasks[0].isDone ||
+    descendants(
+      app,
+      (node) => node.tag === "article" && node.dataset.taskId === "a",
+    ).length ||
+    !updates.some(({ id, patch }) => id === "a" && patch.isDone === true)
+  ) {
+    throw new Error("d did not finish the parent task and hide its card");
+  }
   if (!hooks.has("anyTaskUpdate")) throw new Error("Task refresh hook missing");
   const boardKeydown = documentListeners.get("keydown");
   if (!boardKeydown?.length) throw new Error("Board exit shortcut missing");

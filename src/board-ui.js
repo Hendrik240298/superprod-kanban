@@ -7,7 +7,7 @@
     tags: [],
     tasks: [],
     backlog: new Set(),
-    template: "classic",
+    template: "simple",
     config: { lanes: [] },
     order: {},
     settings: false,
@@ -73,15 +73,14 @@
     }
     const projectId = ctx.id;
     const selectedTemplate = await api.loadSyncedData(`template-${projectId}`);
-    const template = selectedTemplate === "workflow" ? "workflow" : "classic";
-    const configKey = template === "workflow"
-      ? `workflow-lanes-${projectId}`
-      : `lanes-${projectId}`;
+    // An old Classic preference opens the new simple board without changing tasks.
+    const template = selectedTemplate === "workflow" ? "workflow" : "simple";
+    const configKey = `workflow-lanes-${projectId}`;
     let [tags, tasks, projects, rawConfig, rawOrder] = await Promise.all([
       api.getAllTags(),
       api.getTasks(),
       api.getAllProjects(),
-      api.loadSyncedData(configKey),
+      template === "workflow" ? api.loadSyncedData(configKey) : null,
       api.loadSyncedData(`order-${template}-${projectId}`),
     ]);
     if (
@@ -89,18 +88,15 @@
       (await api.getActiveWorkContext())?.id !== projectId
     ) return;
 
-    let stored = parseConfig(rawConfig);
-    if (!stored) {
+    let stored = template === "workflow" ? parseConfig(rawConfig) : null;
+    if (template === "simple" || !stored) {
       const names = template === "workflow"
         ? BoardCore.WORKFLOW_TAGS
-        : ["In Progress"];
+        : BoardCore.SIMPLE_TAGS;
       const lanes = [];
       for (const title of names) {
         // Reuse an existing tag; create only when the template is first selected.
-        let tag = title === "In Progress"
-          ? tags.find((item) => item.id === "KANBAN_IN_PROGRESS")
-          : null;
-        tag ||= tags.find((item) =>
+        let tag = tags.find((item) =>
           item.title?.toLowerCase() === title.toLowerCase()
         );
         if (!tag) {
@@ -111,7 +107,9 @@
         lanes.push({ tagId: tag.id });
       }
       stored = { lanes };
-      await api.persistDataSynced(JSON.stringify(stored), configKey);
+      if (template === "workflow") {
+        await api.persistDataSynced(JSON.stringify(stored), configKey);
+      }
     }
     if (
       token !== loadToken ||
@@ -140,10 +138,8 @@
   }
 
   async function saveConfig(next) {
-    if (!state.ctx) return;
-    const key = state.template === "workflow"
-      ? `workflow-lanes-${state.ctx.id}`
-      : `lanes-${state.ctx.id}`;
+    if (!state.ctx || state.template !== "workflow") return;
+    const key = `workflow-lanes-${state.ctx.id}`;
     await api.persistDataSynced(JSON.stringify(next), key);
     state.config = BoardCore.normalizeConfig(next, state.tags);
   }
@@ -199,7 +195,7 @@
         el(
           "p",
           "keyboard-help",
-          "Esc: board focus · j: focus first card · j/k: next/previous · h/l: lane · Shift+H/J/K/L: move · gg/G: first/last · e: edit · Enter: details · a/i: add · d: done · ?: help · Shift+V: List",
+          "Esc: board focus · j: focus first card · j/k: next/previous · h/l: lane · Shift+H/J/K/L: move · gg/G: first/last · e: edit · Enter: details · a/i: add · d: finish · ?: help · Shift+V: List",
         ),
       );
     }
@@ -267,7 +263,7 @@
       );
       (card || lane?.querySelector(".card") ||
         document.querySelector(".card") ||
-        document.querySelector(".toolbar button"))?.focus();
+        board)?.focus();
     } else if (restoreInputLane) {
       const lane = Array.from(document.querySelectorAll(".lane")).find((node) =>
         node.dataset.laneId === restoreInputLane
@@ -744,13 +740,9 @@
     );
     const meta = el("div", "card-meta");
     const scheduled = BoardCore.scheduledDate(task);
-    if (task.parentId) {
-      meta.append(el("span", "meta-chip", "Subtask · open details to edit"));
+    if (state.backlog.has(task.id)) {
+      meta.append(el("span", "meta-chip", "Backlog"));
     }
-    if (
-      state.backlog.has(task.id) ||
-      (task.parentId && state.backlog.has(task.parentId))
-    ) meta.append(el("span", "meta-chip", "Backlog"));
     if (task.subTaskIds?.length) {
       meta.append(
         el("span", "meta-chip", `${task.subTaskIds.length} subtasks`),
@@ -843,7 +835,7 @@
     templatePicker.setAttribute("aria-label", "Kanban template");
     for (
       const [id, label] of [
-        ["classic", "Classic · To Do / In Progress / Done"],
+        ["simple", "Simple · Backlog / Doing"],
         ["workflow", "Workflow · Clarify / Backlog / …"],
       ]
     ) {
@@ -867,9 +859,10 @@
         "muted",
         state.template === "workflow"
           ? "Clarify holds unfinished tasks without a configured lane tag; completed tasks are hidden. Other lanes use tags."
-          : "To Do holds unfinished tasks without a configured lane tag; Done shows completed tasks. Other lanes use tags.",
+          : "Backlog also shows untagged tasks. Backlog and Doing reuse Workflow tags; completed tasks and subtask cards are hidden.",
       ),
     );
+    if (state.template === "simple") return panel;
     state.config.lanes.forEach((lane, index) => {
       const row = el("div", "settings-row");
       const tag = state.tags.find((item) => item.id === lane.tagId);
@@ -1107,7 +1100,7 @@
           entry.id === current.taskId && entry.projectId === state.ctx?.id
         );
         if (!latest) throw new Error("Task changed or left this project.");
-        await api.updateTask(latest.id, { isDone: !latest.isDone });
+        await api.updateTask(latest.id, { isDone: true });
       });
       return;
     } else if (event.key === "?") {

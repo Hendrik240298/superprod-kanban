@@ -290,6 +290,75 @@ Deno.test("workflow template has Clarify and six tag lanes, but no Done", () => 
   equal(rejected, true);
 });
 
+Deno.test("simple board shares Workflow tags, hides subtasks and completion", () => {
+  const sharedTags = [
+    { id: "backlog", title: "Backlog" },
+    { id: "doing", title: "Doing" },
+  ];
+  const simple = BoardCore.normalizeConfig({
+    lanes: sharedTags.map(({ id }) => ({ tagId: id })),
+  }, sharedTags);
+  equal(
+    BoardCore.columns(simple, sharedTags, "simple").map(({ label }) => label),
+    ["Backlog", "Doing"],
+  );
+  const grouped = BoardCore.projectCards(
+    [
+      { id: "untagged", projectId: "a", tagIds: [], isDone: false },
+      { id: "legacy", projectId: "a", tagIds: ["old-progress"], isDone: false },
+      {
+        id: "doing",
+        projectId: "a",
+        tagIds: ["doing", "backlog"],
+        isDone: false,
+      },
+      {
+        id: "child",
+        projectId: "a",
+        parentId: "untagged",
+        tagIds: ["doing"],
+        isDone: false,
+      },
+      { id: "finished", projectId: "a", tagIds: ["doing"], isDone: true },
+      { id: "other-project", projectId: "b", tagIds: [], isDone: false },
+    ],
+    "a",
+    simple,
+    "simple",
+  );
+  equal(
+    [...grouped].map(([lane, cards]) => [lane, cards.map(({ id }) => id)]),
+    [
+      ["backlog", ["untagged", "legacy"]],
+      ["doing", ["doing"]],
+    ],
+  );
+  equal(
+    BoardCore.movePatch(
+      { tagIds: ["backlog", "doing", "extra"] },
+      "backlog",
+      simple,
+      "simple",
+    ),
+    {
+      tagIds: ["extra", "backlog"],
+      isDone: false,
+    },
+  );
+  equal(BoardCore.createFields("a", "doing", simple, "simple"), {
+    projectId: "a",
+    tagIds: ["doing"],
+    isDone: false,
+  });
+  let rejected = false;
+  try {
+    BoardCore.movePatch({ tagIds: [] }, "done", simple, "simple");
+  } catch {
+    rejected = true;
+  }
+  equal(rejected, true);
+});
+
 Deno.test("lane-local order is applied without changing task records or other lanes", () => {
   const cards = BoardCore.projectCards(
     [
