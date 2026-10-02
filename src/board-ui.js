@@ -269,30 +269,21 @@
     return section;
   }
 
-  function renderAddForm(lane, laneId) {
-    const key = `${state.ctx.id}:${state.template}:${laneId}`;
-    const form = el("form", "add-row");
-    const main = el("div", "add-main");
-    const input = el("input");
-    input.type = "text";
-    input.required = true;
-    input.maxLength = 500;
-    input.value = state.drafts.get(key) || "";
-    input.placeholder = `Add to ${lane.label}`;
-    input.setAttribute("aria-label", `New task in ${lane.label}`);
-    const add = el("button", "", "Add");
-    add.type = "submit";
-    main.append(input, add);
-    form.append(main);
-
+  function setupSuggestions(
+    input,
+    container,
+    laneId,
+    onChange = () => {},
+    id = `suggestions-${laneId}`,
+  ) {
     const suggestions = el("div", "input-suggestions");
-    suggestions.id = `suggestions-${laneId}`;
+    suggestions.id = id;
     suggestions.setAttribute("role", "listbox");
     suggestions.hidden = true;
     input.setAttribute("aria-autocomplete", "list");
     input.setAttribute("aria-controls", suggestions.id);
     input.setAttribute("aria-expanded", "false");
-    form.append(suggestions);
+    container.append(suggestions);
 
     let activeToken = null;
     let candidates = [];
@@ -313,7 +304,7 @@
         : candidate;
       input.value = input.value.slice(0, start) + syntax +
         input.value.slice(end);
-      state.drafts.set(key, input.value);
+      onChange();
       hideSuggestions();
       input.focus();
       input.setSelectionRange(start + syntax.length, start + syntax.length);
@@ -384,6 +375,8 @@
         option.setAttribute("role", "option");
         option.setAttribute("aria-selected", String(index === selectedIndex));
         option.id = `${suggestions.id}-${index}`;
+        option.addEventListener("mousedown", (event) => event.preventDefault());
+        option.addEventListener("click", (event) => event.stopPropagation());
         suggestions.append(option);
       }
       if (candidates.length) {
@@ -432,22 +425,8 @@
       return false;
     }
     input.addEventListener("input", () => {
-      state.drafts.set(key, input.value);
+      onChange();
       updateSuggestions();
-    });
-    input.addEventListener("keydown", (event) => {
-      if (activeToken) navigateSuggestions(event);
-      else if (event.key === "Escape") {
-        event.preventDefault();
-        const lane = Array.from(document.querySelectorAll(".lane")).find((
-          node,
-        ) => node.dataset.laneId === laneId);
-        const cards = Array.from(lane?.querySelectorAll(".card") || []);
-        (cards.find((node) =>
-          node.dataset.taskId === state.focusedCard?.taskId
-        ) ||
-          cards[0] || document.querySelector(".toolbar button"))?.focus();
-      }
     });
     input.addEventListener("keyup", (event) => {
       if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
@@ -455,6 +434,48 @@
       }
     });
     input.addEventListener("click", updateSuggestions);
+
+    return {
+      onKeydown: (event) => activeToken && navigateSuggestions(event),
+      hide: hideSuggestions,
+    };
+  }
+
+  function renderAddForm(lane, laneId) {
+    const key = `${state.ctx.id}:${state.template}:${laneId}`;
+    const form = el("form", "add-row");
+    const main = el("div", "add-main");
+    const input = el("input");
+    input.type = "text";
+    input.required = true;
+    input.maxLength = 500;
+    input.value = state.drafts.get(key) || "";
+    input.placeholder = `Add to ${lane.label}`;
+    input.setAttribute("aria-label", `New task in ${lane.label}`);
+    const add = el("button", "", "Add");
+    add.type = "submit";
+    main.append(input, add);
+    form.append(main);
+
+    const autocomplete = setupSuggestions(
+      input,
+      form,
+      laneId,
+      () => state.drafts.set(key, input.value),
+    );
+    input.addEventListener("keydown", (event) => {
+      if (autocomplete.onKeydown(event)) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        const lane = Array.from(document.querySelectorAll(".lane")).find((
+          node,
+        ) => node.dataset.laneId === laneId);
+        const cards = Array.from(lane?.querySelectorAll(".card") || []);
+        (cards.find((node) =>
+          node.dataset.taskId === state.focusedCard?.taskId
+        ) || cards[0] || document.querySelector(".toolbar button"))?.focus();
+      }
+    });
 
     form.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -584,6 +605,7 @@
     function stopEditing(restoreFocus = true) {
       if (!editing) return;
       editing = false;
+      autocomplete.hide();
       title.hidden = false;
       titleInput.hidden = true;
       card.draggable = !task.parentId;
@@ -606,36 +628,69 @@
     titleInput.addEventListener("blur", () => stopEditing(false));
     titleInput.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== "Escape") return;
+      if (autocomplete.onKeydown(event)) return;
       event.preventDefault();
       event.stopPropagation();
       if (event.key === "Escape") {
         stopEditing();
         return;
       }
-      const nextTitle = titleInput.value.trim();
-      if (!nextTitle) {
-        status("Task title cannot be empty.", true);
+      const rawTitle = titleInput.value;
+      if (rawTitle.trim() === task.title) {
+        stopEditing();
+        return;
+      }
+      let parsed;
+      try {
+        parsed = BoardCore.parseQuickAdd(
+          rawTitle,
+          state.tags,
+          state.config,
+          currentLane,
+        );
+      } catch (error) {
+        status(error.message, true);
         return;
       }
       stopEditing();
-      if (nextTitle === task.title) return;
       void run(async () => {
         try {
           const latest = (await api.getTasks()).find((entry) =>
             entry.id === task.id && entry.projectId === state.ctx?.id
           );
           if (!latest) throw new Error("Task changed or left this project.");
-          await api.updateTask(latest.id, { title: nextTitle });
+          const patch = { title: parsed.title };
+          if (parsed.tagIds.length) {
+            patch.tagIds = [
+              ...new Set([...(latest.tagIds || []), ...parsed.tagIds]),
+            ];
+          }
+          if (parsed.schedule.dueDay) {
+            patch.dueDay = parsed.schedule.dueDay;
+            patch.dueWithTime = null;
+          } else if (parsed.schedule.dueWithTime) {
+            patch.dueWithTime = parsed.schedule.dueWithTime;
+            patch.dueDay = null;
+          }
+          if (parsed.timeEstimate) patch.timeEstimate = parsed.timeEstimate;
+          await api.updateTask(latest.id, patch);
         } catch (error) {
           if (state.ctx?.id === task.projectId && card.isConnected) {
             startEditing();
-            titleInput.value = nextTitle;
+            titleInput.value = rawTitle;
           }
           throw error;
         }
       });
     });
     heading.append(title, titleInput);
+    const autocomplete = setupSuggestions(
+      titleInput,
+      heading,
+      currentLane,
+      undefined,
+      `edit-suggestions-${task.id}`,
+    );
     const meta = el("div", "card-meta");
     const scheduled = BoardCore.scheduledDate(task);
     if (task.parentId) {

@@ -158,6 +158,13 @@ select:focus-visible,
   background: var(--card-bg, #fff);
   color: inherit;
 }
+.card-heading .input-suggestions {
+  flex: 0 0 100%;
+  width: 100%;
+}
+.card-heading .input-suggestions[hidden] {
+  display: none;
+}
 .card-heading {
   display: flex;
   flex-wrap: wrap;

@@ -406,7 +406,36 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   if (titleEdit.hidden || updates.length) {
     throw new Error("Empty title was accepted");
   }
-  titleEdit.value = "Renamed";
+  titleEdit.value = "Renamed @tom";
+  titleEdit.selectionStart = titleEdit.value.length;
+  titleEdit.fire("input");
+  if (
+    !descendants(
+      editCard,
+      (node) =>
+        node.className === "suggestion-option" &&
+        node.textContent === "tomorrow",
+    )
+      .length
+  ) {
+    throw new Error("Inline edit did not suggest @tomorrow");
+  }
+  titleEdit.fire("keydown", {
+    key: "Enter",
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  if (titleEdit.value !== "Renamed @tomorrow" || updates.length) {
+    throw new Error("Enter did not complete @tomorrow before saving");
+  }
+  titleEdit.value = "Renamed @tomorrow #Extra";
+  titleEdit.selectionStart = titleEdit.value.length;
+  titleEdit.fire("input");
+  titleEdit.fire("keydown", {
+    key: "Enter",
+    preventDefault() {},
+    stopPropagation() {},
+  });
   titleEdit.fire("keydown", {
     key: "Enter",
     preventDefault() {},
@@ -415,10 +444,76 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   await flush();
   if (
     tasks[0].title !== "Renamed" ||
-    !updates.some(({ id, patch }) => id === "a" && patch.title === "Renamed") ||
+    !updates.some(({ id, patch }) =>
+      id === "a" && patch.title === "Renamed" &&
+      patch.dueDay === BoardCore.resolveDateSuggestion("tomorrow").day &&
+      patch.dueWithTime === null &&
+      JSON.stringify(patch.tagIds) === JSON.stringify(["extra"]) &&
+      !("timeEstimate" in patch)
+    ) ||
+    tasks[0].timeEstimate !== 5400000 ||
     document.activeElement?.dataset.taskId !== "a"
   ) {
-    throw new Error("Enter did not save the new title and restore card focus");
+    throw new Error(
+      `Inline shortcuts did not preserve existing metadata: ${
+        JSON.stringify(updates)
+      }`,
+    );
+  }
+  const revisedCard = descendants(
+    app,
+    (node) => node.tag === "article" && node.dataset.taskId === "a",
+  )[0];
+  revisedCard.focus();
+  revisedCard.fire("keydown", {
+    key: "e",
+    target: revisedCard,
+    preventDefault() {},
+  });
+  const revisedInput = descendants(
+    revisedCard,
+    (node) => node.className === "card-title-input",
+  )[0];
+  revisedInput.value = "Renamed @every friday";
+  revisedInput.selectionStart = revisedInput.value.length;
+  revisedInput.fire("input");
+  revisedInput.fire("keydown", {
+    key: "Enter",
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  if (
+    revisedInput.hidden || tasks[0].title !== "Renamed" ||
+    !errors.some((text) => text.includes("@ date suggestion"))
+  ) {
+    throw new Error("Unsupported edit date silently changed the task");
+  }
+  revisedInput.value = "Renamed @in 1 hour 45m";
+  revisedInput.selectionStart = revisedInput.value.length;
+  revisedInput.fire("input");
+  revisedInput.fire("keydown", {
+    key: "Enter",
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  revisedInput.fire("keydown", {
+    key: "Enter",
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  await flush();
+  if (
+    !updates.some(({ id, patch }) =>
+      id === "a" &&
+      patch.title === "Renamed" && patch.dueDay === null &&
+      Math.abs(patch.dueWithTime - (Date.now() + 3600000)) < 60000 &&
+      patch.timeEstimate === 2700000 && !("tagIds" in patch)
+    ) ||
+    JSON.stringify(tasks[0].tagIds) !== JSON.stringify(["extra"])
+  ) {
+    throw new Error(
+      "Timed edit did not retain existing tags and replace the schedule",
+    );
   }
   // Edits and completion happen in native details; the host hook refreshes the board.
   tasks.find((task) => task.id === "b").isDone = true;
@@ -458,7 +553,7 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   key(taskCard("a"), "L", true);
   await flush();
   if (
-    JSON.stringify(tasks[0].tagIds) !== JSON.stringify([backlogId]) ||
+    JSON.stringify(tasks[0].tagIds) !== JSON.stringify(["extra", backlogId]) ||
     document.activeElement !== taskCard("a")
   ) {
     throw new Error(
@@ -467,7 +562,10 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   }
   key(taskCard("a"), "H", true);
   await flush();
-  if (tasks[0].tagIds.length || document.activeElement !== taskCard("a")) {
+  if (
+    JSON.stringify(tasks[0].tagIds) !== JSON.stringify(["extra"]) ||
+    document.activeElement !== taskCard("a")
+  ) {
     throw new Error("Shift+H did not restore the card to Clarify");
   }
   key(taskCard("a"), "?");
