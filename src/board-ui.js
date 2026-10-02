@@ -14,6 +14,7 @@
     busy: false,
     drafts: new Map(),
     focusedCard: null,
+    focusBoard: true,
     focusAdd: null,
     help: false,
   };
@@ -118,6 +119,7 @@
     ) return;
     if (state.ctx?.id !== projectId) {
       state.focusedCard = null;
+      state.focusBoard = true;
       state.focusAdd = null;
     }
     state.ctx = ctx;
@@ -166,6 +168,20 @@
     const restoreCard = document.activeElement?.classList.contains("card")
       ? state.focusedCard
       : null;
+    const restoreBoard = state.focusBoard ||
+      document.activeElement?.classList.contains("board");
+    const restoreEdit =
+      document.activeElement?.classList.contains("card-title-input")
+        ? {
+          taskId: document.activeElement.dataset.taskId,
+          value: document.activeElement.value,
+          caret: document.activeElement.selectionStart,
+        }
+        : null;
+    const restoreInputLane =
+      document.activeElement?.classList.contains("task-add-input")
+        ? document.activeElement.dataset.laneId
+        : null;
     const shell = el("div", "shell");
     const toolbar = el("header", "toolbar");
     toolbar.append(
@@ -183,11 +199,24 @@
         el(
           "p",
           "keyboard-help",
-          "j/k: next/previous card · h/l: lane · Shift+H/J/K/L: move card · gg/G: first/last · e: edit title · Enter: details · a/i: add · d: done · ?: help · Ctrl+Alt+K: List",
+          "Esc: board focus · j: focus first card · j/k: next/previous · h/l: lane · Shift+H/J/K/L: move · gg/G: first/last · e: edit · Enter: details · a/i: add · d: done · ?: help · Shift+V: List",
         ),
       );
     }
     const board = el("div", "board");
+    board.tabIndex = 0;
+    board.setAttribute(
+      "aria-label",
+      "Kanban board. Press j to focus a card, or ? for shortcuts.",
+    );
+    board.addEventListener("focus", () => {
+      state.focusedCard = null;
+    });
+    board.addEventListener("click", (event) => {
+      if (!event.target.closest?.(".card, .add-row, button, input, select")) {
+        board.focus();
+      }
+    });
     const columns = BoardCore.columns(state.config, state.tags, state.template);
     const grouped = BoardCore.orderCards(
       BoardCore.projectCards(
@@ -205,6 +234,7 @@
     }
     shell.append(board);
     app.replaceChildren(shell);
+    state.focusBoard = false;
     if (
       state.focusAdd && (state.focusAdd.projectId !== state.ctx.id ||
         state.focusAdd.template !== state.template)
@@ -218,6 +248,16 @@
       );
       state.focusAdd = null;
       lane?.querySelector(".add-row input")?.focus();
+    } else if (restoreEdit) {
+      const card = Array.from(document.querySelectorAll(".card")).find((node) =>
+        node.dataset.taskId === restoreEdit.taskId
+      );
+      if (card) {
+        card.startEditing();
+        const input = card.querySelector(".card-title-input");
+        input.value = restoreEdit.value;
+        input.setSelectionRange(restoreEdit.caret, restoreEdit.caret);
+      } else board.focus();
     } else if (restoreCard) {
       const card = Array.from(document.querySelectorAll(".card")).find((node) =>
         node.dataset.taskId === restoreCard.taskId
@@ -228,6 +268,13 @@
       (card || lane?.querySelector(".card") ||
         document.querySelector(".card") ||
         document.querySelector(".toolbar button"))?.focus();
+    } else if (restoreInputLane) {
+      const lane = Array.from(document.querySelectorAll(".lane")).find((node) =>
+        node.dataset.laneId === restoreInputLane
+      );
+      lane?.querySelector(".add-row input")?.focus();
+    } else if (restoreBoard) {
+      board.focus();
     }
   }
 
@@ -446,6 +493,8 @@
     const form = el("form", "add-row");
     const main = el("div", "add-main");
     const input = el("input");
+    input.className = "task-add-input";
+    input.dataset.laneId = laneId;
     input.type = "text";
     input.required = true;
     input.maxLength = 500;
@@ -473,7 +522,7 @@
         const cards = Array.from(lane?.querySelectorAll(".card") || []);
         (cards.find((node) =>
           node.dataset.taskId === state.focusedCard?.taskId
-        ) || cards[0] || document.querySelector(".toolbar button"))?.focus();
+        ) || cards[0] || document.querySelector(".board"))?.focus();
       }
     });
 
@@ -594,6 +643,7 @@
     const heading = el("div", "card-heading");
     const title = el("span", "card-title", task.title || "(Untitled task)");
     const titleInput = el("input", "card-title-input");
+    titleInput.dataset.taskId = task.id;
     titleInput.type = "text";
     titleInput.maxLength = 500;
     titleInput.hidden = true;
@@ -624,6 +674,7 @@
         titleInput.value.length,
       );
     }
+    card.startEditing = startEditing;
     titleInput.addEventListener("click", (event) => event.stopPropagation());
     titleInput.addEventListener("blur", () => stopEditing(false));
     titleInput.addEventListener("keydown", (event) => {
@@ -923,11 +974,16 @@
   api.registerHook(api.Hooks.WORK_CONTEXT_CHANGE, scheduleRefresh);
   api.registerHook(api.Hooks.PERSISTED_DATA_CHANGED, scheduleRefresh);
   document.addEventListener("keydown", (event) => {
+    const key = event.key.toLowerCase();
+    const inField = event.target?.closest?.(
+      "input, textarea, select, [contenteditable]",
+    );
+    const controlAltK = event.ctrlKey && event.altKey && !event.shiftKey &&
+      !event.metaKey && key === "k" && !event.getModifierState?.("AltGraph");
+    const shiftV = event.shiftKey && !event.ctrlKey && !event.altKey &&
+      !event.metaKey && key === "v" && !inField;
     if (
-      !state.ctx || !event.ctrlKey || !event.altKey || event.shiftKey ||
-      event.metaKey || event.key.toLowerCase() !== "k" ||
-      event.getModifierState?.("AltGraph") ||
-      event.target?.closest?.("input, textarea, select, [contenteditable]")
+      !state.ctx || event.repeat || !(controlAltK || shiftV)
     ) return;
     event.preventDefault();
     void api.persistDataSynced("list", `view-${state.ctx.id}`)
@@ -936,16 +992,29 @@
   });
   document.addEventListener("keydown", (event) => {
     if (event.key !== "g") lastG = 0;
+    const cardFocused = document.activeElement?.classList.contains("card");
+    const boardFocused = document.activeElement?.classList.contains("board");
     if (
       !state.ctx || event.ctrlKey || event.altKey || event.metaKey ||
       event.target?.closest?.(
         "input, textarea, select, button, [contenteditable]",
       ) ||
-      state.settings
+      state.settings || (!cardFocused && !boardFocused)
     ) return;
+    if (event.key === "Escape" && state.help) {
+      event.preventDefault();
+      state.help = false;
+      render();
+      return;
+    }
+    if (event.key === "Escape" && cardFocused) {
+      event.preventDefault();
+      document.querySelector(".board")?.focus();
+      return;
+    }
     const lanes = Array.from(document.querySelectorAll(".lane"));
     if (!lanes.length) return;
-    const current = state.focusedCard;
+    const current = cardFocused ? state.focusedCard : null;
     const laneIndex = Math.max(
       0,
       lanes.findIndex((lane) => lane.dataset.laneId === current?.laneId),
@@ -959,6 +1028,12 @@
       card?.focus();
       card?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
     };
+    if (boardFocused && ["j", "k", "g", "G"].includes(event.key)) {
+      event.preventDefault();
+      const available = Array.from(document.querySelectorAll(".card"));
+      focus(event.key === "G" ? available.at(-1) : available[0]);
+      return;
+    }
     if (
       event.shiftKey && ["H", "J", "K", "L"].includes(event.key) &&
       current?.taskId && document.activeElement?.classList.contains("card")
@@ -1035,9 +1110,9 @@
         await api.updateTask(latest.id, { isDone: !latest.isDone });
       });
       return;
-    } else if (event.key === "?" || (event.key === "Escape" && state.help)) {
+    } else if (event.key === "?") {
       event.preventDefault();
-      state.help = event.key === "?" ? !state.help : false;
+      state.help = !state.help;
       render();
       return;
     } else return;

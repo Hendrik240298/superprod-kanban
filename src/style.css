@@ -84,6 +84,10 @@ select:focus-visible,
   overflow-x: auto;
   padding-bottom: var(--s2, 16px);
 }
+.board:focus-visible {
+  outline-offset: -2px;
+  border-radius: 8px;
+}
 .lane {
   flex: 0 0 min(300px, 85vw);
   min-width: 0;

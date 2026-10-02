@@ -187,6 +187,9 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
     { error: (...args) => errors.push(args.join(" ")) },
   );
   await flush();
+  if (document.activeElement?.className !== "board") {
+    throw new Error("Board did not start with a predictable focus target");
+  }
   if (
     descendants(
       app,
@@ -329,6 +332,14 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
     );
   }
   currentCards[0].focus();
+  key(currentCards[0], "Escape");
+  if (document.activeElement?.className !== "board") {
+    throw new Error("Escape did not leave card navigation inside Kanban");
+  }
+  key(document.activeElement, "j");
+  if (document.activeElement !== currentCards[0]) {
+    throw new Error("j did not enter card navigation from board focus");
+  }
   key(currentCards[0], "j");
   if (document.activeElement !== currentCards[1]) {
     throw new Error("j did not focus next card");
@@ -361,6 +372,11 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   if (document.activeElement !== currentCards[0]) {
     throw new Error("Escape did not restore card focus");
   }
+  key(currentCards[0], "Escape");
+  if (document.activeElement?.className !== "board") {
+    throw new Error("A second Escape did not leave card navigation");
+  }
+  key(document.activeElement, "j");
   currentCards[0].fire("click");
   currentCards[1].fire("keydown", { key: "Enter", preventDefault() {} });
   currentCards[0].fire("keydown", { key: " ", preventDefault() {} });
@@ -756,26 +772,66 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   ) {
     throw new Error("Selected multiword tag did not persist");
   }
+  const cardBeforeRefresh = descendants(
+    app,
+    (node) => node.tag === "article" && node.dataset.taskId === "a",
+  )[0];
+  cardBeforeRefresh.focus();
+  cardBeforeRefresh.fire("keydown", {
+    key: "e",
+    target: cardBeforeRefresh,
+    preventDefault() {},
+  });
+  const draftInput = descendants(
+    cardBeforeRefresh,
+    (node) => node.className === "card-title-input",
+  )[0];
+  draftInput.value = "Unsaved draft";
+  draftInput.setSelectionRange(5, 5);
+  hooks.get("anyTaskUpdate")();
+  await new Promise((resolve) => setTimeout(resolve, 220));
+  await flush();
+  if (
+    document.activeElement?.className !== "card-title-input" ||
+    document.activeElement.value !== "Unsaved draft" ||
+    document.activeElement.selectionStart !== 5
+  ) {
+    throw new Error("Board refresh lost the inline edit draft or caret");
+  }
+  document.activeElement.fire("keydown", {
+    key: "Escape",
+    preventDefault() {},
+    stopPropagation() {},
+  });
   if (!hooks.has("anyTaskUpdate")) throw new Error("Task refresh hook missing");
   const boardKeydown = documentListeners.get("keydown");
   if (!boardKeydown?.length) throw new Error("Board exit shortcut missing");
-  const chord = (target) =>
+  const chord = (target, key, modifiers) =>
     boardKeydown.forEach((fn) =>
       fn({
-        key: "k",
-        ctrlKey: true,
-        altKey: true,
+        key,
+        ...modifiers,
         target,
         preventDefault() {},
       })
     );
-  chord({ closest: () => ({ tag: "input" }) });
+  const field = { closest: () => ({ tag: "input" }) };
+  chord(field, "V", { shiftKey: true });
   if (closed.length || values.has("view-p")) {
-    throw new Error("Board shortcut stole a key while typing");
+    throw new Error("Shift+V stole a capital V while typing");
   }
-  chord({ closest: () => null });
+  chord(field, "k", { ctrlKey: true, altKey: true });
   await flush();
   if (values.get("view-p") !== "list" || closed.length !== 1) {
-    throw new Error("Board shortcut did not restore the project list");
+    throw new Error("Ctrl+Alt+K did not exit from an input");
+  }
+  values.delete("view-p");
+  closed.length = 0;
+  const boardSurface = document.querySelector(".board");
+  boardSurface.focus();
+  chord(boardSurface, "V", { shiftKey: true });
+  await flush();
+  if (values.get("view-p") !== "list" || closed.length !== 1) {
+    throw new Error("Shift+V did not exit Kanban from card navigation");
   }
 });
