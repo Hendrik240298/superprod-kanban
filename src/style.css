@@ -175,6 +175,50 @@ select:focus-visible,
   align-items: center;
   gap: 6px;
 }
+.card-complete {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 2px solid var(--text-color-muted, #777);
+  border-radius: 50%;
+  background: transparent;
+  color: transparent;
+  line-height: 1;
+}
+.card-complete:hover,
+.card-complete:focus-visible {
+  border-color: var(--c-primary, #7559d9);
+  color: var(--c-primary, #7559d9);
+}
+.card-menu {
+  position: fixed;
+  z-index: 20;
+  width: 228px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  padding: 5px;
+  border: 1px solid var(--divider-color, #aaa5);
+  border-radius: 8px;
+  background: var(--card-bg, #fff);
+  box-shadow: var(--whiteframe-shadow-8dp, 0 6px 24px #0004);
+}
+.card-menu button {
+  display: block;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-color, #292929);
+  text-align: left;
+}
+.card-menu button:hover,
+.card-menu button:focus-visible {
+  background: var(--bg-darker, #efefef);
+}
 .card-estimate {
   flex: none;
   white-space: nowrap;

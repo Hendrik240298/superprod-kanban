@@ -21,6 +21,7 @@
   let loadToken = 0;
   let refreshTimer;
   let lastG = 0;
+  let activeMenu = null;
 
   const el = (tag, className, text) => {
     const node = document.createElement(tag);
@@ -161,6 +162,7 @@
 
   function render() {
     if (!state.ctx) return;
+    closeMenu();
     const restoreCard = document.activeElement?.classList.contains("card")
       ? state.focusedCard
       : null;
@@ -195,7 +197,7 @@
         el(
           "p",
           "keyboard-help",
-          "Esc: board focus · j: focus first card · j/k: next/previous · h/l: lane · Shift+H/J/K/L: move · gg/G: first/last · e: edit · Enter: details · a/i: add · d: finish · ?: help · Shift+V: List",
+          "Esc: board focus · j: focus first card · j/k: next/previous · h/l: lane · Shift+H/J/K/L: move · gg/G: first/last · e: edit · m: actions · Enter: details · a/i: add · d: finish · ?: help · Shift+V: List",
         ),
       );
     }
@@ -574,17 +576,138 @@
     return form;
   }
 
+  function closeMenu(restoreFocus = true) {
+    if (!activeMenu) return;
+    const { node, card } = activeMenu;
+    activeMenu = null;
+    node.remove();
+    if (restoreFocus && card.isConnected) card.focus();
+  }
+
+  function finishTask(taskId) {
+    const projectId = state.ctx?.id;
+    void run(async () => {
+      const latest = (await api.getTasks()).find((entry) =>
+        entry.id === taskId && entry.projectId === projectId && !entry.parentId
+      );
+      if (!latest) throw new Error("Task changed or left this project.");
+      await api.updateTask(latest.id, { isDone: true });
+    });
+  }
+
+  function scheduleTask(taskId, day) {
+    const projectId = state.ctx?.id;
+    void run(async () => {
+      const latest = (await api.getTasks()).find((entry) =>
+        entry.id === taskId && entry.projectId === projectId && !entry.parentId
+      );
+      if (!latest) throw new Error("Task changed or left this project.");
+      await api.updateTask(latest.id, {
+        dueDay: BoardCore.resolveDateSuggestion(day).day,
+        dueWithTime: null,
+      });
+    });
+  }
+
+  function orderTask(taskId, laneId, toTop) {
+    void run(async () => {
+      const grouped = BoardCore.orderCards(
+        BoardCore.projectCards(
+          state.tasks,
+          state.ctx.id,
+          state.config,
+          state.template,
+        ),
+        state.order,
+      );
+      if (!grouped.get(laneId)?.some((task) => task.id === taskId)) {
+        throw new Error("Task changed or left this lane.");
+      }
+      const beforeId = toTop
+        ? grouped.get(laneId).find((task) => task.id !== taskId)?.id || null
+        : null;
+      await saveOrder(
+        BoardCore.placeTask(grouped, state.order, taskId, laneId, beforeId),
+      );
+    });
+  }
+
+  function openCardMenu(card, task, laneId, x, y) {
+    closeMenu(false);
+    card.focus();
+    const menu = el("div", "card-menu");
+    menu.setAttribute("role", "menu");
+    menu.setAttribute(
+      "aria-label",
+      `Actions for ${task.title || "Untitled task"}`,
+    );
+    menu.style.left = `${
+      Math.max(8, Math.min(x, (window.innerWidth || 1024) - 236))
+    }px`;
+    menu.style.top = `${
+      Math.max(8, Math.min(y, (window.innerHeight || 768) - 286))
+    }px`;
+    const action = (label, callback) => {
+      const button = control(label, (event) => {
+        event.stopPropagation();
+        closeMenu();
+        callback();
+      });
+      button.setAttribute("role", "menuitem");
+      menu.append(button);
+    };
+    action("Complete task", () => finishTask(task.id));
+    action("Schedule today", () => scheduleTask(task.id, "today"));
+    action("Schedule tomorrow", () => scheduleTask(task.id, "tomorrow"));
+    action("Move to top", () => orderTask(task.id, laneId, true));
+    action("Move to bottom", () => orderTask(task.id, laneId, false));
+    action(
+      "Open task details",
+      () =>
+        void api.selectTask(task.id).catch((error) =>
+          status(String(error), true)
+        ),
+    );
+    menu.addEventListener("keydown", (event) => {
+      const items = Array.from(menu.querySelectorAll("button"));
+      const index = items.indexOf(document.activeElement);
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeMenu();
+      } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        items[
+          (index + items.length + (event.key === "ArrowDown" ? 1 : -1)) %
+          items.length
+        ].focus();
+      }
+    });
+    menu.addEventListener("focusout", (event) => {
+      if (!menu.contains(event.relatedTarget)) closeMenu(false);
+    });
+    document.querySelector(".shell").append(menu);
+    activeMenu = { node: menu, card };
+    menu.querySelector("button").focus();
+  }
+
+  document.addEventListener("pointerdown", (event) => {
+    if (activeMenu && !activeMenu.node.contains(event.target)) closeMenu(false);
+  });
+
   function renderCard(task, currentLane, nextCardId) {
     const card = el("article", "card");
     card.dataset.taskId = task.id;
     card.addEventListener("focus", () => {
       state.focusedCard = { laneId: currentLane, taskId: task.id };
     });
-    card.setAttribute("role", "button");
+    card.setAttribute("role", "group");
     card.tabIndex = 0;
+    card.setAttribute("aria-keyshortcuts", "M Shift+F10");
     card.setAttribute(
       "aria-label",
-      `Open details for ${task.title || "Untitled task"}`,
+      `${
+        task.title || "Untitled task"
+      }. Enter for details, m for actions, d to complete`,
     );
     const openDetails = () => {
       void api.selectTask(task.id).catch((error) =>
@@ -592,8 +715,27 @@
       );
     };
     card.addEventListener("click", openDetails);
+    card.addEventListener("contextmenu", (event) => {
+      if (
+        event.target?.closest?.("input, textarea, select, [contenteditable]")
+      ) return;
+      event.preventDefault();
+      openCardMenu(card, task, currentLane, event.clientX, event.clientY);
+    });
     card.addEventListener("keydown", (event) => {
       if (event.target && event.target !== card) return;
+      if (event.key === "m" || (event.key === "F10" && event.shiftKey)) {
+        event.preventDefault();
+        const rect = card.getBoundingClientRect();
+        openCardMenu(
+          card,
+          task,
+          currentLane,
+          rect.left || 8,
+          rect.bottom || rect.top || 8,
+        );
+        return;
+      }
       if (event.key === "e") {
         event.preventDefault();
         startEditing();
@@ -730,7 +872,17 @@
         }
       });
     });
-    heading.append(title, titleInput);
+    const complete = control("✓", (event) => {
+      event.stopPropagation();
+      card.focus();
+      finishTask(task.id);
+    }, "card-complete");
+    complete.setAttribute(
+      "aria-label",
+      `Complete ${task.title || "Untitled task"}`,
+    );
+    complete.title = "Complete task";
+    heading.append(complete, title, titleInput);
     const autocomplete = setupSuggestions(
       titleInput,
       heading,
@@ -1095,13 +1247,7 @@
       document.activeElement?.classList.contains("card")
     ) {
       event.preventDefault();
-      void run(async () => {
-        const latest = (await api.getTasks()).find((entry) =>
-          entry.id === current.taskId && entry.projectId === state.ctx?.id
-        );
-        if (!latest) throw new Error("Task changed or left this project.");
-        await api.updateTask(latest.id, { isDone: true });
-      });
+      finishTask(current.taskId);
       return;
     } else if (event.key === "?") {
       event.preventDefault();

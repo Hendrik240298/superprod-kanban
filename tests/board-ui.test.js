@@ -15,6 +15,7 @@ class Node {
       contains: (name) => this.className.split(" ").includes(name),
     };
     this.dataset = {};
+    this.style = {};
     this.offsetHeight = 100;
   }
   append(...nodes) {
@@ -22,6 +23,20 @@ class Node {
   }
   replaceChildren(...nodes) {
     this.children = [...nodes];
+  }
+  remove() {
+    const parent =
+      descendants(Node.root, (node) => node.children.includes(this))[0];
+    if (parent) {
+      parent.children = parent.children.filter((node) => node !== this);
+    }
+  }
+  contains(node) {
+    return descendants(this, (entry) => entry === node).length > 0;
+  }
+  get isConnected() {
+    return this.contains(this) &&
+      !!descendants(Node.root, (node) => node === this).length;
   }
   get lastChild() {
     return this.children.at(-1);
@@ -92,6 +107,7 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
     new URL("../src/board-ui.js", import.meta.url),
   );
   const app = new Node("main");
+  Node.root = app;
   app.id = "app";
   const documentListeners = new Map();
   const document = {
@@ -364,11 +380,10 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   if (
     currentCards.length !== 2 ||
     currentCards.some((card) =>
-      card.attributes.role !== "button" || card.tabIndex !== 0 ||
-      descendants(
-        card,
-        (node) => node.tag === "details" || node.tag === "button",
-      ).length
+      card.attributes.role !== "group" || card.tabIndex !== 0 ||
+      descendants(card, (node) => node.tag === "details").length ||
+      descendants(card, (node) => node.className === "card-complete").length !==
+        1
     )
   ) {
     throw new Error(
@@ -847,13 +862,141 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
     preventDefault() {},
     stopPropagation() {},
   });
+  const menuCard = descendants(
+    app,
+    (node) => node.tag === "article" && node.dataset.taskId === "a",
+  )[0];
+  menuCard.fire("contextmenu", {
+    preventDefault() {},
+    clientX: 120,
+    clientY: 200,
+  });
+  const menu = () =>
+    descendants(app, (node) => node.className === "card-menu")[0];
+  const menuItem = (label) =>
+    descendants(
+      menu(),
+      (node) => node.tag === "button" && node.textContent === label,
+    )[0];
+  if (
+    !menu() || !menuItem("Complete task") ||
+    !menuItem("Schedule today") || !menuItem("Schedule tomorrow") ||
+    !menuItem("Move to top") || !menuItem("Move to bottom") ||
+    !menuItem("Open task details") ||
+    document.activeElement !== menuItem("Complete task")
+  ) {
+    throw new Error(
+      "Right-click did not show a keyboard-focusable action menu",
+    );
+  }
+  menu().fire("keydown", { key: "ArrowDown", preventDefault() {} });
+  if (document.activeElement !== menuItem("Schedule today")) {
+    throw new Error("ArrowDown did not navigate the action menu");
+  }
+  menu().fire("keydown", { key: "Escape", preventDefault() {} });
+  if (menu() || document.activeElement !== menuCard) {
+    throw new Error(
+      "Escape did not close the action menu and restore card focus",
+    );
+  }
+  menuCard.fire("contextmenu", {
+    preventDefault() {},
+    clientX: 12,
+    clientY: 12,
+  });
+  for (const listener of documentListeners.get("pointerdown") || []) {
+    listener({ target: menuCard });
+  }
+  if (menu()) throw new Error("Clicking outside did not dismiss the menu");
+  const editingInput =
+    descendants(menuCard, (node) => node.className === "card-title-input")[0];
+  menuCard.fire("contextmenu", {
+    target: editingInput,
+    preventDefault() {
+      throw new Error("Native input context menu was stolen");
+    },
+  });
+  if (menu()) throw new Error("Editing input opened the card action menu");
+  menuCard.fire("keydown", { key: "m", target: menuCard, preventDefault() {} });
+  menuItem("Open task details").fire("click", { stopPropagation() {} });
+  await flush();
+  if (selected.at(-1) !== "a" || menu()) {
+    throw new Error("Action menu did not open native task details");
+  }
+  menuCard.fire("contextmenu", { preventDefault() {}, clientX: 1, clientY: 1 });
+  menuItem("Schedule tomorrow").fire("click", { stopPropagation() {} });
+  await flush();
+  if (
+    !updates.some(({ id, patch }) =>
+      id === "a" &&
+      patch.dueDay === BoardCore.resolveDateSuggestion("tomorrow").day &&
+      patch.dueWithTime === null
+    ) || tasks[0].timeEstimate !== 2700000
+  ) {
+    throw new Error(
+      "Scheduling from the menu did not replace the timed date safely",
+    );
+  }
+  const latestCard = () =>
+    descendants(
+      app,
+      (node) => node.tag === "article" && node.dataset.taskId === "a",
+    )[0];
+  latestCard().fire("contextmenu", {
+    preventDefault() {},
+    clientX: 1,
+    clientY: 1,
+  });
+  menuItem("Schedule today").fire("click", { stopPropagation() {} });
+  await flush();
+  if (tasks[0].dueDay !== BoardCore.resolveDateSuggestion("today").day) {
+    throw new Error("Schedule today did not apply");
+  }
+  const tagIdsBeforeOrder = JSON.stringify(tasks[0].tagIds);
+  const updatesBeforeOrder = updates.length;
+  latestCard().fire("contextmenu", {
+    preventDefault() {},
+    clientX: 1,
+    clientY: 1,
+  });
+  menuItem("Move to bottom").fire("click", { stopPropagation() {} });
+  await flush();
+  const clarifyIds = () =>
+    descendants(
+      descendants(app, (node) =>
+        node.className === "lane" &&
+        node.attributes["aria-label"] === "Clarify")[0],
+      (node) => node.tag === "article",
+    ).map((node) => node.dataset.taskId);
+  if (clarifyIds().at(-1) !== "a") {
+    throw new Error("Move to bottom did not update board-local order");
+  }
+  latestCard().fire("contextmenu", {
+    preventDefault() {},
+    clientX: 1,
+    clientY: 1,
+  });
+  menuItem("Move to top").fire("click", { stopPropagation() {} });
+  await flush();
+  if (
+    clarifyIds()[0] !== "a" || updates.length !== updatesBeforeOrder ||
+    JSON.stringify(tasks[0].tagIds) !== tagIdsBeforeOrder
+  ) {
+    throw new Error("Move to top changed task metadata or failed to reorder");
+  }
+  latestCard().fire("keydown", {
+    key: "F10",
+    shiftKey: true,
+    target: latestCard(),
+    preventDefault() {},
+  });
+  if (!menu()) throw new Error("Shift+F10 did not open the card menu");
+  menuItem("Complete task").fire("click", { stopPropagation() {} });
+  await flush();
   const finishCard = descendants(
     app,
     (node) => node.tag === "article" && node.dataset.taskId === "a",
   )[0];
-  finishCard.focus();
-  key(finishCard, "d");
-  await flush();
   if (
     !tasks[0].isDone ||
     descendants(
@@ -862,7 +1005,24 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
     ).length ||
     !updates.some(({ id, patch }) => id === "a" && patch.isDone === true)
   ) {
-    throw new Error("d did not finish the parent task and hide its card");
+    throw new Error("Menu did not finish the parent task and hide its card");
+  }
+  if (finishCard) throw new Error("Completed card remained visible");
+  const remainingCard = descendants(
+    app,
+    (node) => node.tag === "article" && node.dataset.taskId === "new-1",
+  )[0];
+  const completeButton =
+    descendants(remainingCard, (node) => node.className === "card-complete")[0];
+  completeButton.fire("click", { stopPropagation() {} });
+  await flush();
+  if (
+    !tasks.find((task) => task.id === "new-1").isDone ||
+    descendants(app, (node) =>
+      node.tag === "article" &&
+      node.dataset.taskId === "new-1").length
+  ) {
+    throw new Error("Visible complete button did not finish the task");
   }
   if (!hooks.has("anyTaskUpdate")) throw new Error("Task refresh hook missing");
   const boardKeydown = documentListeners.get("keydown");
