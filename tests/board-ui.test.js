@@ -59,6 +59,9 @@ class Node {
   fire(key, event = {}) {
     this.listeners[key]?.(event);
   }
+  click() {
+    this.fire("click", { stopPropagation() {} });
+  }
   focus() {
     Node.activeElement = this;
     this.fire("focus");
@@ -916,6 +919,14 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   if (menu().style.top !== "200px") {
     throw new Error("Action menu did not open beside the pointer");
   }
+  menuCard.fire("contextmenu", {
+    preventDefault() {},
+    clientX: 1000,
+    clientY: 760,
+  });
+  if (menu().style.left !== "761px" || menu().style.top !== "660px") {
+    throw new Error("Compact action menu overflowed the viewport");
+  }
   menu().fire("keydown", { key: "ArrowDown", preventDefault() {} });
   if (document.activeElement !== menuItem("Schedule tomorrow")) {
     throw new Error("ArrowDown did not navigate the action menu");
@@ -946,6 +957,23 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   if (menu()) throw new Error("Editing input opened the card action menu");
   menuCard.fire("keydown", { key: "m", target: menuCard, preventDefault() {} });
   if (!menu()) throw new Error("m did not reopen the menu");
+  menu().fire("keydown", { key: "a", preventDefault() {} });
+  if (!descendants(menu(), (node) => node.tag === "input").length) {
+    throw new Error("The displayed A badge did not open Add subtask");
+  }
+  menu().fire("keydown", { key: "Escape", preventDefault() {} });
+  menu().fire("keydown", { key: "t", preventDefault() {} });
+  if (!menuItem("30m")) {
+    throw new Error("The displayed T badge did not open Estimate");
+  }
+  menu().fire("keydown", { key: "Escape", preventDefault() {} });
+  menu().fire("keydown", { key: "Backspace", preventDefault() {} });
+  if (!menuItem("Delete task and subtasks")) {
+    throw new Error(
+      "Backspace must open the confirmation, not delete directly",
+    );
+  }
+  menu().fire("keydown", { key: "Escape", preventDefault() {} });
   menu().fire("keydown", { key: "Escape", preventDefault() {} });
   menuCard.fire("contextmenu", { preventDefault() {}, clientX: 1, clientY: 1 });
   menuItem("Schedule tomorrow").fire("click", { stopPropagation() {} });
@@ -1113,6 +1141,16 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
     throw new Error("Move to project did not update the native project");
   }
   openTaskMenu("new-5");
+  if (
+    !descendants(
+      menuItem("Delete task"),
+      (node) =>
+        node.className === "card-menu-hint" && node.textContent === "Backspace",
+    )
+      .length
+  ) {
+    throw new Error("Delete action lost its keyboard hint");
+  }
   menuItem("Delete task").fire("click", { stopPropagation() {} });
   if (
     !menuItem("Delete task and subtasks") ||
@@ -1236,6 +1274,19 @@ Deno.test("card action menu uses injected host theme tokens", async () => {
   ) {
     if (!menuCss.includes(`var(${token},`)) {
       throw new Error(`Menu does not follow host theme token ${token}`);
+    }
+  }
+  for (
+    const rule of [
+      "width: min(255px, calc(100vw - 16px))",
+      "height: 48px",
+      "min-height: 48px",
+      "width: 20px",
+      "font-size: .875rem",
+    ]
+  ) {
+    if (!menuCss.includes(rule)) {
+      throw new Error(`Menu lost compact List-style proportion ${rule}`);
     }
   }
 });

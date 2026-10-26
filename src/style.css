@@ -217,13 +217,14 @@ select:focus-visible,
 .card-menu {
   position: fixed;
   z-index: 20;
-  width: min(360px, calc(100vw - 16px));
+  width: min(255px, calc(100vw - 16px));
   max-height: calc(100vh - 16px);
   overflow-y: auto;
   border: 1px solid var(--divider-color, #aaa5);
-  border-radius: 12px;
+  border-radius: 8px;
   background: var(--card-bg, #fff);
   color: var(--text-color, #292929);
+  font-size: .875rem;
   box-shadow: var(--whiteframe-shadow-8dp, 0 6px 24px #0004);
 }
 .card-menu button {
@@ -241,7 +242,7 @@ select:focus-visible,
   border-bottom: 1px solid var(--divider-color, #aaa5);
 }
 .card-menu-toolbar button {
-  min-height: 68px;
+  height: 48px;
   border-right: 1px solid var(--divider-color, #aaa5);
   color: var(--text-color-muted, #777);
 }
@@ -250,30 +251,30 @@ select:focus-visible,
 }
 .card-menu-toolbar svg {
   display: block;
-  width: 30px;
-  height: 30px;
+  width: 22px;
+  height: 22px;
   margin: auto;
 }
 .card-menu-actions {
-  padding: 6px 0;
+  padding: 0;
 }
 .card-menu-item {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
   width: 100%;
-  min-height: 58px;
-  padding: 8px 18px;
+  min-height: 48px;
+  padding: 6px 14px;
   text-align: left;
 }
 .card-menu-icon {
-  flex: 0 0 34px;
+  flex: 0 0 32px;
   color: var(--text-color-muted, #777);
 }
 .card-menu-icon svg {
   display: block;
-  width: 26px;
-  height: 26px;
+  width: 20px;
+  height: 20px;
   margin: auto;
 }
 .card-menu-label {
@@ -283,17 +284,27 @@ select:focus-visible,
 }
 .card-menu-hint {
   flex: none;
-  max-width: 100px;
-  padding: 3px 7px;
-  border: 1px solid var(--divider-color, #aaa5);
+  max-width: 88px;
+  padding: 1px 5px;
+  border: 1px solid color-mix(in srgb, var(--text-color-muted, #777) 55%,
+    transparent);
   border-radius: 999px;
   color: var(--text-color-muted, #777);
-  font-size: .75rem;
+  font-size: .72rem;
+  line-height: 1.2;
   white-space: nowrap;
 }
 .card-menu-chevron {
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid currentColor;
   color: var(--text-color-muted, #777);
-  font-size: 1.3rem;
+}
+.card-menu-danger .card-menu-chevron,
+.card-menu-shortcut-only .card-menu-chevron {
+  display: none;
 }
 .card-menu-back {
   border-bottom: 1px solid var(--divider-color, #aaa5) !important;
@@ -304,13 +315,13 @@ select:focus-visible,
   color: var(--c-warn, #bb2828);
 }
 .card-menu-warning {
-  margin: 12px 18px;
+  margin: 12px 14px;
   font-size: .9rem;
 }
 .card-menu-form {
   display: flex;
   gap: 8px;
-  padding: 12px 18px;
+  padding: 12px 14px;
 }
 .card-menu-form input {
   min-width: 0;
@@ -330,7 +341,7 @@ select:focus-visible,
   display: none;
 }
 .card-menu-form-error:not(:empty) {
-  margin: 0 18px 12px;
+  margin: 0 14px 12px;
   color: var(--c-warn, #bb2828);
   font-size: .85rem;
 }

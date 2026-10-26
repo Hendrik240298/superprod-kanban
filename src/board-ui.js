@@ -37,8 +37,9 @@
       "M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6 7 7m10 10 1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z",
     sunrise:
       "M3 18h18M5 15a7 7 0 0 1 14 0M12 3v3M5 7l2 2m12-2-2 2M3 15h2m14 0h2",
-    archive: "M4 4h9v2H6v14h12v-6h2v8H4V4Zm10 1 6 6-6 6v-4H9V9h5V5Z",
-    calendar: "M4 5h16v16H4V5Zm4-2v4m8-4v4M4 9h16m-10 5 2 2 3-4",
+    archive:
+      "M3 8h18v12H3V8Zm5 0V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v3m-6 4 4 3-4 3m4-3H8",
+    calendar: "M4 5h16v16H4V5Zm4-2v4m8-4v4M4 9h16m-12 4h8",
     calendarX: "M4 5h16v16H4V5Zm4-2v4m8-4v4M4 9h16m-9 4 5 5m0-5-5 5",
     focus:
       "M3 8V4h4m10 0h4v4M3 16v4h4m10 0h4v-4M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z",
@@ -51,7 +52,7 @@
     tag: "M3 5h12l6 7-6 7H3V5Z",
     arrow: "M3 5h8v2H5v12h14v-5m-9-2h11m-5-5 5 5-5 5",
     folder: "M3 6h7l2 2h9v12H3V6Z",
-    trash: "M4 6h16M9 6V4h6v2m-9 0 1 15h10l1-15m-8 4v7m4-7v7",
+    trash: "M4 6h16M9 6V4h6v2m-9 0 1 15h10l1-15m-8 5 4 4m0-4-4 4",
     back: "m15 5-7 7 7 7",
     x: "M5 5l14 14M19 5 5 19",
     clock: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 4v5l3 2",
@@ -735,8 +736,8 @@
     );
     menu.tabIndex = -1;
     const positionMenu = () => {
-      const width = menu.offsetWidth || 360;
-      const height = menu.offsetHeight || 710;
+      const width = menu.offsetWidth || 255;
+      const height = menu.offsetHeight || 530;
       const left = Number.isFinite(x) ? x : 8;
       const top = Number.isFinite(y) ? y : 8;
       menu.style.left = `${
@@ -893,9 +894,9 @@
               "",
               (title) => addSubtask(task.id, title),
             ),
-          "",
+          "A",
           true,
-        );
+        ).classList.add("card-menu-shortcut-only");
         item(list, "copy", "Duplicate", () => openTaskInList(task.id), "List");
         item(
           list,
@@ -934,7 +935,7 @@
                 true,
               ],
             ]),
-          "",
+          "T",
           true,
         );
         item(
@@ -968,7 +969,7 @@
                 ]),
             );
           },
-          "",
+          "G",
           true,
         );
         item(
@@ -995,7 +996,7 @@
                 task.repeatCfgId ? "List: repeats" : "",
               ]),
             ),
-          "",
+          "E",
           true,
         );
         const deleteItem = item(
@@ -1024,7 +1025,7 @@
                 menu.append(actions);
               },
             ),
-          "",
+          "Backspace",
           true,
         );
         deleteItem.classList.add("card-menu-danger");
@@ -1033,6 +1034,17 @@
     menu.addEventListener("keydown", (event) => {
       const items = Array.from(menu.querySelectorAll("button"));
       const index = items.indexOf(document.activeElement);
+      const shortcut = view === "main" && !event.ctrlKey && !event.altKey &&
+          !event.metaKey && !event.shiftKey &&
+          document.activeElement?.tagName !== "INPUT"
+        ? {
+          a: "Add subtask",
+          t: "Estimate",
+          g: "Toggle tags",
+          e: "Move to project",
+          Backspace: "Delete task",
+        }[event.key]
+        : null;
       if (event.key === "Escape") {
         event.preventDefault();
         if (view === "main") closeMenu();
@@ -1053,6 +1065,11 @@
       ) {
         event.preventDefault();
         document.activeElement.click();
+      } else if (shortcut) {
+        event.preventDefault();
+        Array.from(menu.querySelectorAll(".card-menu-item")).find((button) =>
+          button.querySelector(".card-menu-label")?.textContent === shortcut
+        )?.click();
       }
     });
     menu.addEventListener("focusout", (event) => {
