@@ -47,6 +47,9 @@ class Node {
   removeAttribute(key) {
     delete this.attributes[key];
   }
+  getAttribute(key) {
+    return this.attributes[key] || null;
+  }
   addEventListener(key, fn) {
     this.listeners[key] = fn;
   }
@@ -61,6 +64,13 @@ class Node {
     this.fire("focus");
   }
   querySelectorAll(selector) {
+    if (selector.includes(", ")) {
+      return [
+        ...new Set(
+          selector.split(", ").flatMap((part) => this.querySelectorAll(part)),
+        ),
+      ];
+    }
     const [parent, child] = selector.split(" ");
     const match = (node, part) =>
       part.startsWith(".")
@@ -112,6 +122,7 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   const documentListeners = new Map();
   const document = {
     createElement: (tag) => new Node(tag),
+    createElementNS: (_namespace, tag) => new Node(tag),
     addEventListener: (key, fn) =>
       documentListeners.set(key, [
         ...(documentListeners.get(key) || []),
@@ -190,7 +201,10 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
     }),
     getAllTags: async () => [...tags],
     getTasks: async () => [...tasks],
-    getAllProjects: async () => [{ id: "p", backlogTaskIds: [] }],
+    getAllProjects: async () => [
+      { id: "p", title: "Sample", backlogTaskIds: [] },
+      { id: "q", title: "Other", backlogTaskIds: [] },
+    ],
     loadSyncedData: async (key) => values.get(key) || null,
     persistDataSynced: async (value, key) => {
       values.set(key, value);
@@ -203,6 +217,11 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
     updateTask: async (id, patch) => {
       updates.push({ id, patch });
       Object.assign(tasks.find((task) => task.id === id), patch);
+    },
+    deleteTask: async (id) => {
+      const index = tasks.findIndex((task) => task.id === id);
+      if (index < 0) throw new Error("Task not found");
+      tasks.splice(index, 1);
     },
     addTask: async (fields) => {
       added.push(fields);
@@ -874,23 +893,31 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   const menu = () =>
     descendants(app, (node) => node.className === "card-menu")[0];
   const menuItem = (label) =>
-    descendants(
-      menu(),
-      (node) => node.tag === "button" && node.textContent === label,
-    )[0];
+    descendants(menu(), (node) =>
+      node.tag === "button" &&
+      (node.attributes["aria-label"] === label ||
+        descendants(node, (child) =>
+          child.className === "card-menu-label" &&
+          child.textContent === label).length))[0];
   if (
-    !menu() || !menuItem("Complete task") ||
+    !menu() || !menuItem("Start focus session") ||
     !menuItem("Schedule today") || !menuItem("Schedule tomorrow") ||
     !menuItem("Move to top") || !menuItem("Move to bottom") ||
-    !menuItem("Open task details") ||
-    document.activeElement !== menuItem("Complete task")
+    !menuItem("Add subtask") || !menuItem("Duplicate") ||
+    !menuItem("Estimate") || !menuItem("Priority") ||
+    !menuItem("Toggle tags") || !menuItem("Move to project") ||
+    !menuItem("Delete task") ||
+    document.activeElement !== menuItem("Schedule today")
   ) {
     throw new Error(
       "Right-click did not show a keyboard-focusable action menu",
     );
   }
+  if (menu().style.top !== "200px") {
+    throw new Error("Action menu did not open beside the pointer");
+  }
   menu().fire("keydown", { key: "ArrowDown", preventDefault() {} });
-  if (document.activeElement !== menuItem("Schedule today")) {
+  if (document.activeElement !== menuItem("Schedule tomorrow")) {
     throw new Error("ArrowDown did not navigate the action menu");
   }
   menu().fire("keydown", { key: "Escape", preventDefault() {} });
@@ -918,11 +945,8 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   });
   if (menu()) throw new Error("Editing input opened the card action menu");
   menuCard.fire("keydown", { key: "m", target: menuCard, preventDefault() {} });
-  menuItem("Open task details").fire("click", { stopPropagation() {} });
-  await flush();
-  if (selected.at(-1) !== "a" || menu()) {
-    throw new Error("Action menu did not open native task details");
-  }
+  if (!menu()) throw new Error("m did not reopen the menu");
+  menu().fire("keydown", { key: "Escape", preventDefault() {} });
   menuCard.fire("contextmenu", { preventDefault() {}, clientX: 1, clientY: 1 });
   menuItem("Schedule tomorrow").fire("click", { stopPropagation() {} });
   await flush();
@@ -991,7 +1015,122 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
     preventDefault() {},
   });
   if (!menu()) throw new Error("Shift+F10 did not open the card menu");
-  menuItem("Complete task").fire("click", { stopPropagation() {} });
+  menu().fire("keydown", { key: "Escape", preventDefault() {} });
+  const openTaskMenu = (id) => {
+    const card = descendants(
+      app,
+      (node) => node.tag === "article" && node.dataset.taskId === id,
+    )[0];
+    card.fire("contextmenu", { preventDefault() {}, clientX: 90, clientY: 40 });
+  };
+  openTaskMenu("a");
+  menuItem("Choose scheduled date").fire("click", { stopPropagation() {} });
+  const dateInput = descendants(menu(), (node) => node.tag === "input")[0];
+  dateInput.value = "2026-11-05";
+  descendants(menu(), (node) => node.tag === "form")[0].fire("submit", {
+    preventDefault() {},
+  });
+  await flush();
+  if (tasks[0].dueDay !== "2026-11-05" || tasks[0].dueWithTime !== null) {
+    throw new Error("Choose date did not update the native schedule");
+  }
+  openTaskMenu("a");
+  menuItem("Estimate").fire("click", { stopPropagation() {} });
+  if (!menuItem("30m") || !menuItem("Custom estimate")) {
+    throw new Error("Estimate submenu missing");
+  }
+  menuItem("30m").fire("click", { stopPropagation() {} });
+  await flush();
+  if (tasks[0].timeEstimate !== 1800000) {
+    throw new Error("Estimate submenu did not save 30m");
+  }
+  openTaskMenu("a");
+  menuItem("Estimate").fire("click", { stopPropagation() {} });
+  menuItem("Custom estimate").fire("click", { stopPropagation() {} });
+  const customInput = descendants(menu(), (node) => node.tag === "input")[0];
+  customInput.value = "invalid";
+  descendants(menu(), (node) => node.tag === "form")[0].fire("submit", {
+    preventDefault() {},
+  });
+  if (
+    !menu() || tasks[0].timeEstimate !== 1800000 ||
+    !descendants(menu(), (node) =>
+      node.className === "card-menu-form-error" &&
+      node.textContent.includes("Enter an estimate")).length
+  ) {
+    throw new Error(
+      "Invalid estimate must leave the form open without updating",
+    );
+  }
+  customInput.value = "45m";
+  descendants(menu(), (node) => node.tag === "form")[0].fire("submit", {
+    preventDefault() {},
+  });
+  await flush();
+  if (tasks[0].timeEstimate !== 2700000) {
+    throw new Error("Custom estimate failed or its submenu closed early");
+  }
+  openTaskMenu("a");
+  menuItem("Toggle tags").fire("click", { stopPropagation() {} });
+  if (!menuItem("Focus Time") || menuItem("Backlog")) {
+    throw new Error("Tag submenu showed lane tags or omitted available tags");
+  }
+  menuItem("Focus Time").fire("click", { stopPropagation() {} });
+  await flush();
+  if (JSON.stringify(tasks[0].tagIds) !== JSON.stringify(["extra", "focus"])) {
+    throw new Error("Toggling a tag discarded unrelated tags");
+  }
+  openTaskMenu("a");
+  menuItem("Add subtask").fire("click", { stopPropagation() {} });
+  const subtaskTitle = descendants(menu(), (node) => node.tag === "input")[0];
+  subtaskTitle.value = "Child via menu";
+  descendants(menu(), (node) => node.tag === "form")[0].fire("submit", {
+    preventDefault() {},
+  });
+  await flush();
+  const createdSubtask = tasks.find((entry) =>
+    entry.title === "Child via menu"
+  );
+  if (
+    createdSubtask?.parentId !== "a" || createdSubtask.projectId !== "p" ||
+    selected.at(-1) !== createdSubtask.id ||
+    descendants(app, (node) =>
+      node.tag === "article" &&
+      node.dataset.taskId === createdSubtask.id).length
+  ) {
+    throw new Error("Add subtask did not attach it to its parent safely");
+  }
+  openTaskMenu("new-6");
+  menuItem("Move to project").fire("click", { stopPropagation() {} });
+  menuItem("Other").fire("click", { stopPropagation() {} });
+  await flush();
+  if (
+    tasks.find((entry) => entry.id === "new-6").projectId !== "q" ||
+    descendants(app, (node) =>
+      node.tag === "article" &&
+      node.dataset.taskId === "new-6").length
+  ) {
+    throw new Error("Move to project did not update the native project");
+  }
+  openTaskMenu("new-5");
+  menuItem("Delete task").fire("click", { stopPropagation() {} });
+  if (
+    !menuItem("Delete task and subtasks") ||
+    !tasks.some((entry) => entry.id === "new-5")
+  ) {
+    throw new Error("Delete task lacked an explicit confirmation");
+  }
+  menuItem("Cancel").fire("click", { stopPropagation() {} });
+  openTaskMenu("new-5");
+  menuItem("Delete task").fire("click", { stopPropagation() {} });
+  menuItem("Delete task and subtasks").fire("click", { stopPropagation() {} });
+  await flush();
+  if (tasks.some((entry) => entry.id === "new-5")) {
+    throw new Error("Confirmed delete did not call the supported task API");
+  }
+  const parentComplete =
+    descendants(latestCard(), (node) => node.className === "card-complete")[0];
+  parentComplete.fire("click", { stopPropagation() {} });
   await flush();
   const finishCard = descendants(
     app,
@@ -1005,7 +1144,9 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
     ).length ||
     !updates.some(({ id, patch }) => id === "a" && patch.isDone === true)
   ) {
-    throw new Error("Menu did not finish the parent task and hide its card");
+    throw new Error(
+      "Completion circle did not finish the parent task and hide its card",
+    );
   }
   if (finishCard) throw new Error("Completed card remained visible");
   const remainingCard = descendants(
@@ -1060,5 +1201,41 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   await flush();
   if (values.get("view-p") !== "list" || closed.length !== 1) {
     throw new Error("Shift+V did not exit Kanban from card navigation");
+  }
+  values.delete("view-p");
+  closed.length = 0;
+  openTaskMenu("new-3");
+  menuItem("Start focus session").fire("click", { stopPropagation() {} });
+  await flush();
+  if (
+    values.get("view-p") !== "list" || closed.length !== 1 ||
+    selected.at(-1) !== "new-3"
+  ) {
+    throw new Error(
+      "Host-only menu action did not take the task to native List",
+    );
+  }
+});
+
+Deno.test("card action menu uses injected host theme tokens", async () => {
+  const css = await Deno.readTextFile(
+    new URL("../src/style.css", import.meta.url),
+  );
+  const menuCss = css.slice(
+    css.indexOf(".card-menu {"),
+    css.indexOf(".card-estimate {"),
+  );
+  for (
+    const token of [
+      "--card-bg",
+      "--bg-lighter",
+      "--divider-color",
+      "--text-color",
+      "--text-color-muted",
+    ]
+  ) {
+    if (!menuCss.includes(`var(${token},`)) {
+      throw new Error(`Menu does not follow host theme token ${token}`);
+    }
   }
 });
