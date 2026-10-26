@@ -177,21 +177,42 @@ select:focus-visible,
 }
 .card-complete {
   flex: none;
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
+  position: relative;
+  align-self: flex-start;
+  width: 26px;
+  height: 26px;
+  margin-right: -6px;
   padding: 0;
-  border: 2px solid var(--text-color-muted, #777);
-  border-radius: 50%;
+  border: 0;
   background: transparent;
+  color: var(--text-color-muted, #777);
+}
+.card-complete::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 4px;
+  width: 16px;
+  height: 16px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+}
+.card-complete::after {
+  content: "✓";
+  position: absolute;
+  top: 2px;
+  left: 7px;
   color: transparent;
-  line-height: 1;
+  font-size: 13px;
+  line-height: 18px;
 }
 .card-complete:hover,
 .card-complete:focus-visible {
-  border-color: var(--c-primary, #7559d9);
   color: var(--c-primary, #7559d9);
+}
+.card-complete:hover::after,
+.card-complete:focus-visible::after {
+  color: currentColor;
 }
 .card-menu {
   position: fixed;

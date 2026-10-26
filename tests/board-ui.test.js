@@ -1014,6 +1014,12 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   )[0];
   const completeButton =
     descendants(remainingCard, (node) => node.className === "card-complete")[0];
+  if (
+    completeButton.textContent ||
+    !completeButton.attributes["aria-label"].startsWith("Complete ")
+  ) {
+    throw new Error("Completion circle should not show a permanent checkmark");
+  }
   completeButton.fire("click", { stopPropagation() {} });
   await flush();
   if (

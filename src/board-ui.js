@@ -872,7 +872,7 @@
         }
       });
     });
-    const complete = control("✓", (event) => {
+    const complete = control("", (event) => {
       event.stopPropagation();
       card.focus();
       finishTask(task.id);
