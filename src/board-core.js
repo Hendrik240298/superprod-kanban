@@ -11,23 +11,40 @@ const BoardCore = (() => {
     "Maybe-Later",
   ];
   const WORKFLOW_LEGACY_TAGS = {
-    "This-Week": "This Week",
-    "Maybe-Later": "Maybe/Later",
+    "This-Week": ["This Week"],
+    "Maybe-Later": ["Maybe/Later"],
   };
   const SIMPLE_TAGS = ["Backlog", "Doing"];
 
-  function existingPresetTag(title, tags, tasks, projectId) {
-    const named = (name) =>
-      tags.find((tag) => tag.title?.toLowerCase() === name?.toLowerCase());
-    const legacy = named(WORKFLOW_LEGACY_TAGS[title]);
-    // An unconfigured project with old tagged tasks must keep their tag ID.
-    if (
-      legacy &&
-      tasks.some((task) =>
-        task.projectId === projectId && task.tagIds?.includes(legacy.id)
-      )
-    ) return legacy;
-    return named(title) || legacy || null;
+  function migrateWorkflowConfig(config, availableTags) {
+    const byName = (name) =>
+      availableTags.find((tag) =>
+        tag.title?.toLowerCase() === name.toLowerCase()
+      );
+    const replacements = new Map();
+    for (
+      const [currentName, oldNames] of Object.entries(WORKFLOW_LEGACY_TAGS)
+    ) {
+      const current = byName(currentName);
+      if (!current) continue;
+      for (const oldName of oldNames) {
+        const old = byName(oldName);
+        if (old && old.id !== current.id) replacements.set(old.id, current.id);
+      }
+    }
+    const retired = new Set(config.retiredTagIds || []);
+    const seen = new Set();
+    const lanes = [];
+    for (const lane of config.lanes || []) {
+      const tagId = replacements.get(lane.tagId) || lane.tagId;
+      if (tagId !== lane.tagId) retired.add(lane.tagId);
+      if (seen.has(tagId)) continue;
+      lanes.push({ ...lane, tagId });
+      seen.add(tagId);
+    }
+    return retired.size
+      ? { ...config, lanes, retiredTagIds: [...retired] }
+      : { ...config, lanes };
   }
   const DATE_SUGGESTIONS = [
     "today",
@@ -71,6 +88,7 @@ const BoardCore = (() => {
     const ranges = [];
     const tagIds = [];
     const laneTags = new Set(config.lanes.map((lane) => lane.tagId));
+    const retiredTags = new Set(config.retiredTagIds || []);
     for (const match of raw.matchAll(/(^|\s)#(?:"([^"]+)"|([^\s#@]+))/g)) {
       const start = match.index + match[1].length;
       const name = match[2] || match[3];
@@ -80,6 +98,11 @@ const BoardCore = (() => {
       if (!tag || tag.id === "TODAY") {
         throw new Error(
           `Unknown tag #${name}. Select an existing tag from the suggestions.`,
+        );
+      }
+      if (retiredTags.has(tag.id)) {
+        throw new Error(
+          `Old lane tag #${name} was replaced. Use its new lane.`,
         );
       }
       if (laneTags.has(tag.id) && tag.id !== laneId) {
@@ -299,7 +322,12 @@ const BoardCore = (() => {
           : "",
       });
     }
-    return { lanes };
+    const retiredTagIds = [
+      ...new Set(
+        Array.isArray(value?.retiredTagIds) ? value.retiredTagIds : [],
+      ),
+    ].filter((id) => tags.has(id) && !seen.has(id));
+    return retiredTagIds.length ? { lanes, retiredTagIds } : { lanes };
   }
 
   function columns(config, tags, template = "classic") {
@@ -315,7 +343,7 @@ const BoardCore = (() => {
       ...config.lanes.map((lane) => ({
         ...lane,
         label: lane.label ||
-          WORKFLOW_LEGACY_TAGS[tagById.get(lane.tagId)?.title] ||
+          WORKFLOW_LEGACY_TAGS[tagById.get(lane.tagId)?.title]?.[0] ||
           tagById.get(lane.tagId)?.title || "Tag",
       })),
       ...(template === "workflow" ? [] : [done]),
@@ -372,7 +400,10 @@ const BoardCore = (() => {
     ) {
       throw new Error("Unknown destination lane");
     }
-    const laneIds = new Set(config.lanes.map((lane) => lane.tagId));
+    const laneIds = new Set([
+      ...config.lanes.map((lane) => lane.tagId),
+      ...(template === "workflow" ? config.retiredTagIds || [] : []),
+    ]);
     const tagIds = [
       ...new Set((task.tagIds || []).filter((id) => !laneIds.has(id))),
     ];
@@ -439,7 +470,7 @@ const BoardCore = (() => {
     SIMPLE_TAGS,
     WORKFLOW_TAGS,
     WORKFLOW_LEGACY_TAGS,
-    existingPresetTag,
+    migrateWorkflowConfig,
     dateSuggestions,
     resolveDateSuggestion,
     estimateSuggestions,

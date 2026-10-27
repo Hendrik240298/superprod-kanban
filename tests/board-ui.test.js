@@ -1303,3 +1303,164 @@ Deno.test("card action menu uses injected host theme tokens", async () => {
     }
   }
 });
+
+Deno.test("existing project boards migrate lanes without rewriting tasks", async () => {
+  const source = await Deno.readTextFile(
+    new URL("../src/board-ui.js", import.meta.url),
+  );
+  const app = new Node("main");
+  Node.root = app;
+  app.id = "app";
+  const document = {
+    createElement: (tag) => new Node(tag),
+    createElementNS: (_namespace, tag) => new Node(tag),
+    addEventListener() {},
+    querySelectorAll: (selector) => app.querySelectorAll(selector),
+    querySelector: (selector) => app.querySelector(selector),
+    get activeElement() {
+      return Node.activeElement;
+    },
+    getElementById: (id) =>
+      descendants(app, (node) => node.id === id)[0] || null,
+  };
+  const values = new Map([
+    ["template-p", "workflow"],
+    [
+      "workflow-lanes-p",
+      JSON.stringify({
+        lanes: [
+          { tagId: "old-week", label: "My Week" },
+          { tagId: "old-later" },
+        ],
+      }),
+    ],
+    ["workflow-lanes-q", JSON.stringify({ lanes: [{ tagId: "old-week" }] })],
+  ]);
+  const tags = [
+    { id: "old-week", title: "This Week" },
+    { id: "week", title: "This-Week" },
+    { id: "old-later", title: "Maybe/Later" },
+  ];
+  const tasks = [
+    {
+      id: "a",
+      title: "Legacy week",
+      projectId: "p",
+      tagIds: ["old-week", "extra"],
+      isDone: false,
+    },
+    {
+      id: "b",
+      title: "Legacy later",
+      projectId: "p",
+      tagIds: ["old-later"],
+      isDone: false,
+    },
+    {
+      id: "c",
+      title: "Other project",
+      projectId: "q",
+      tagIds: ["old-week"],
+      isDone: false,
+    },
+  ];
+  let updates = 0;
+  const api = {
+    Hooks: {
+      ANY_TASK_UPDATE: "task",
+      WORK_CONTEXT_CHANGE: "context",
+      PERSISTED_DATA_CHANGED: "data",
+    },
+    registerHook() {},
+    getActiveWorkContext: async () => ({
+      id: "p",
+      type: "PROJECT",
+      title: "P",
+    }),
+    getAllProjects: async () => [
+      { id: "p", title: "P", backlogTaskIds: [] },
+      { id: "q", title: "Q", backlogTaskIds: [] },
+    ],
+    getAllTags: async () => [...tags],
+    getTasks: async () => [...tasks],
+    addTag: async ({ title }) => {
+      const id = `new-${tags.length}`;
+      tags.push({ id, title });
+      return id;
+    },
+    updateTask: async (id, patch) => {
+      updates++;
+      Object.assign(tasks.find((task) => task.id === id), patch);
+    },
+    loadSyncedData: async (key) => values.get(key) || null,
+    persistDataSynced: async (value, key) => values.set(key, value),
+  };
+  new Function("window", "document", "BoardCore", "console", source)(
+    { PluginAPI: api },
+    document,
+    BoardCore,
+    { error() {} },
+  );
+  await flush();
+  const later = tags.find((tag) => tag.title === "Maybe-Later");
+  const pConfig = JSON.parse(values.get("workflow-lanes-p"));
+  const qConfig = JSON.parse(values.get("workflow-lanes-q"));
+  if (
+    !later ||
+    JSON.stringify(pConfig.lanes.map((lane) => lane.tagId)) !==
+      JSON.stringify(["week", later.id]) ||
+    JSON.stringify(qConfig.lanes.map((lane) => lane.tagId)) !==
+      JSON.stringify(["week"]) ||
+    JSON.stringify(pConfig.retiredTagIds) !==
+      JSON.stringify(["old-week", "old-later"]) ||
+    JSON.stringify(qConfig.retiredTagIds) !== JSON.stringify(["old-week"]) ||
+    updates !== 0 || tasks[0].tagIds[0] !== "old-week"
+  ) {
+    throw new Error(
+      "Saved boards were not retargeted without touching task tags",
+    );
+  }
+  const lane = (name) =>
+    descendants(
+      app,
+      (node) =>
+        node.tag === "section" && node.className === "lane" &&
+        node.attributes["aria-label"] === name,
+    )[0];
+  if (
+    !lane("Clarify") || !lane("My Week") || !lane("Maybe/Later") ||
+    descendants(lane("Clarify"), (node) => node.tag === "article").length !== 2
+  ) {
+    throw new Error(
+      "Legacy tasks did not appear in Clarify for manual migration",
+    );
+  }
+  lane("My Week").fire("drop", {
+    preventDefault() {},
+    dataTransfer: { getData: () => "a" },
+  });
+  await flush();
+  if (
+    updates !== 1 ||
+    JSON.stringify(tasks[0].tagIds) !== JSON.stringify(["extra", "week"]) ||
+    JSON.stringify(tasks[2].tagIds) !== JSON.stringify(["old-week"])
+  ) {
+    throw new Error("Moving a legacy card did not replace its old tag safely");
+  }
+  descendants(
+    app,
+    (node) => node.tag === "button" && node.textContent === "Configure lanes",
+  )[0].click();
+  const alias = descendants(app, (node) =>
+    node.tag === "input" &&
+    node.attributes["aria-label"] === "Display label for This-Week")[0];
+  alias.value = "This week’s focus";
+  alias.fire("change");
+  await flush();
+  if (
+    JSON.stringify(JSON.parse(values.get("workflow-lanes-p")).retiredTagIds) !==
+      JSON.stringify(["old-week", "old-later"])
+  ) {
+    throw new Error("Editing lane settings lost the legacy tag cleanup rule");
+  }
+});

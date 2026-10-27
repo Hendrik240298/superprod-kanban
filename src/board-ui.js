@@ -23,6 +23,7 @@
   let refreshTimer;
   let lastG = 0;
   let activeMenu = null;
+  let workflowMigration;
 
   const el = (tag, className, text) => {
     const node = document.createElement(tag);
@@ -108,6 +109,61 @@
     }
   }
 
+  function ensureWorkflowMigration() {
+    if (workflowMigration) return workflowMigration;
+    workflowMigration = (async () => {
+      const [projects, existingTags] = await Promise.all([
+        api.getAllProjects(),
+        api.getAllTags(),
+      ]);
+      const tags = [...existingTags];
+      for (const project of projects) {
+        const key = `workflow-lanes-${project.id}`;
+        const raw = await api.loadSyncedData(key);
+        if (!raw) continue;
+        let stored;
+        try {
+          stored = parseConfig(raw);
+        } catch {
+          // One malformed project must not prevent opening other boards.
+          continue;
+        }
+        if (!Array.isArray(stored?.lanes)) continue;
+        for (
+          const [title, legacyNames] of Object.entries(
+            BoardCore.WORKFLOW_LEGACY_TAGS,
+          )
+        ) {
+          const hasLegacyLane = stored.lanes.some((lane) =>
+            tags.some((tag) =>
+              tag.id === lane.tagId &&
+              legacyNames.some((name) =>
+                tag.title?.toLowerCase() === name.toLowerCase()
+              )
+            )
+          );
+          if (
+            hasLegacyLane &&
+            !tags.some((tag) =>
+              tag.title?.toLowerCase() === title.toLowerCase()
+            )
+          ) {
+            const id = await api.addTag({ title });
+            tags.push({ id, title });
+          }
+        }
+        const migrated = BoardCore.migrateWorkflowConfig(stored, tags);
+        if (JSON.stringify(migrated) !== JSON.stringify(stored)) {
+          await api.persistDataSynced(JSON.stringify(migrated), key);
+        }
+      }
+    })().catch((error) => {
+      workflowMigration = null;
+      throw error;
+    });
+    return workflowMigration;
+  }
+
   async function loadProject() {
     const token = ++loadToken;
     const ctx = await api.getActiveWorkContext();
@@ -117,6 +173,13 @@
       app.textContent = "Open a project to see its Kanban board.";
       return;
     }
+    let migrationError = null;
+    try {
+      await ensureWorkflowMigration();
+    } catch (error) {
+      migrationError = error instanceof Error ? error.message : String(error);
+    }
+    if (token !== loadToken) return;
     const projectId = ctx.id;
     const selectedTemplate = await api.loadSyncedData(`template-${projectId}`);
     // An old Classic preference opens the new simple board without changing tasks.
@@ -142,7 +205,9 @@
       const lanes = [];
       for (const title of names) {
         // Reuse an existing tag; create only when the template is first selected.
-        let tag = BoardCore.existingPresetTag(title, tags, tasks, projectId);
+        let tag = tags.find((item) =>
+          item.title?.toLowerCase() === title.toLowerCase()
+        );
         if (!tag) {
           const id = await api.addTag({ title });
           tag = { id, title };
@@ -180,13 +245,22 @@
         [],
     );
     render();
+    if (migrationError) {
+      status(
+        `Workflow tag update failed; existing lanes were kept. ${migrationError}`,
+        true,
+      );
+    }
   }
 
   async function saveConfig(next) {
     if (!state.ctx || state.template !== "workflow") return;
     const key = `workflow-lanes-${state.ctx.id}`;
-    await api.persistDataSynced(JSON.stringify(next), key);
-    state.config = BoardCore.normalizeConfig(next, state.tags);
+    const stored = state.config.retiredTagIds?.length
+      ? { ...next, retiredTagIds: state.config.retiredTagIds }
+      : next;
+    await api.persistDataSynced(JSON.stringify(stored), key);
+    state.config = BoardCore.normalizeConfig(stored, state.tags);
   }
 
   async function saveOrder(next) {
@@ -446,6 +520,7 @@
         );
         candidates = state.tags.filter((tag) =>
           tag.id !== "TODAY" && !laneTagIds.has(tag.id) &&
+          !state.config.retiredTagIds?.includes(tag.id) &&
           tag.title?.toLowerCase().includes(query.toLowerCase())
         ).slice(0, 10).map((tag) => tag.title);
       }
@@ -955,6 +1030,7 @@
               "Toggle tags",
               state.tags
                 .filter((tag) => tag.id !== "TODAY" && !laneTags.has(tag.id))
+                .filter((tag) => !state.config.retiredTagIds?.includes(tag.id))
                 .map((tag) => [
                   task.tagIds?.includes(tag.id) ? "check" : "plus",
                   tag.title,

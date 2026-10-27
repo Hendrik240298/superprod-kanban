@@ -300,24 +300,9 @@ Deno.test("workflow template has Clarify and six tag lanes, but no Done", () => 
     ],
   );
   equal(BoardCore.WORKFLOW_LEGACY_TAGS, {
-    "This-Week": "This Week",
-    "Maybe-Later": "Maybe/Later",
+    "This-Week": ["This Week"],
+    "Maybe-Later": ["Maybe/Later"],
   });
-  const legacy = { id: "old-week", title: "This Week" };
-  const slug = { id: "new-week", title: "This-Week" };
-  equal(
-    BoardCore.existingPresetTag("This-Week", [legacy, slug], [{
-      projectId: "p",
-      tagIds: [legacy.id],
-    }], "p"),
-    legacy,
-  );
-  equal(
-    BoardCore.existingPresetTag("This-Week", [legacy, slug], [], "p"),
-    slug,
-  );
-  equal(BoardCore.existingPresetTag("This-Week", [legacy], [], "p"), legacy);
-  equal(BoardCore.existingPresetTag("This-Week", [], [], "p"), null);
   equal(
     BoardCore.columns(
       { lanes: [{ tagId: "w1", label: "This sprint" }] },
@@ -346,6 +331,85 @@ Deno.test("workflow template has Clarify and six tag lanes, but no Done", () => 
     rejected = true;
   }
   equal(rejected, true);
+});
+
+Deno.test("existing Workflow lanes switch to slug tags without moving tasks", () => {
+  const available = [
+    { id: "backlog", title: "Backlog" },
+    { id: "old-week", title: "This Week" },
+    { id: "week", title: "This-Week" },
+    { id: "old-later", title: "Maybe/Later" },
+    { id: "later", title: "Maybe-Later" },
+    { id: "doing", title: "Doing" },
+  ];
+  const stored = {
+    lanes: [
+      { tagId: "backlog" },
+      { tagId: "old-week", label: "My Week" },
+      { tagId: "doing" },
+      { tagId: "old-later" },
+      { tagId: "later" },
+    ],
+  };
+  const migrated = BoardCore.migrateWorkflowConfig(stored, available);
+  equal(migrated, {
+    lanes: [
+      { tagId: "backlog" },
+      { tagId: "week", label: "My Week" },
+      { tagId: "doing" },
+      { tagId: "later" },
+    ],
+    retiredTagIds: ["old-week", "old-later"],
+  });
+  equal(BoardCore.migrateWorkflowConfig(migrated, available), migrated);
+  const config = BoardCore.normalizeConfig(migrated, available);
+  const task = {
+    projectId: "p",
+    tagIds: ["old-week", "unrelated"],
+    isDone: false,
+  };
+  equal(BoardCore.laneFor(task, config, "workflow"), "todo");
+  equal(BoardCore.movePatch(task, "week", config, "workflow"), {
+    tagIds: ["unrelated", "week"],
+    isDone: false,
+  });
+  equal(
+    BoardCore.movePatch(
+      { ...task, tagIds: ["old-later", "unrelated"] },
+      "later",
+      config,
+      "workflow",
+    ),
+    {
+      tagIds: ["unrelated", "later"],
+      isDone: false,
+    },
+  );
+  equal(
+    BoardCore.movePatch(
+      { ...task, tagIds: ["later", "unrelated"] },
+      "later",
+      config,
+      "workflow",
+    ),
+    {
+      tagIds: ["unrelated", "later"],
+      isDone: false,
+    },
+  );
+  equal(BoardCore.movePatch(task, "week", config, "simple").tagIds, [
+    "old-week",
+    "unrelated",
+    "week",
+  ]);
+  let oldTagRejected = false;
+  try {
+    BoardCore.parseQuickAdd('Review #"This Week"', available, config, "todo");
+  } catch (error) {
+    oldTagRejected = error.message.includes("Old lane tag");
+  }
+  equal(oldTagRejected, true);
+  equal(stored.lanes[1].tagId, "old-week");
 });
 
 Deno.test("simple board shares Workflow tags, hides subtasks and completion", () => {
