@@ -4,13 +4,31 @@ const BoardCore = (() => {
   const done = { kind: "done", label: "Done" };
   const WORKFLOW_TAGS = [
     "Backlog",
-    "This Week",
+    "This-Week",
     "Doing",
     "Waiting",
     "Scheduled",
-    "Maybe/Later",
+    "Maybe-Later",
   ];
+  const WORKFLOW_LEGACY_TAGS = {
+    "This-Week": "This Week",
+    "Maybe-Later": "Maybe/Later",
+  };
   const SIMPLE_TAGS = ["Backlog", "Doing"];
+
+  function existingPresetTag(title, tags, tasks, projectId) {
+    const named = (name) =>
+      tags.find((tag) => tag.title?.toLowerCase() === name?.toLowerCase());
+    const legacy = named(WORKFLOW_LEGACY_TAGS[title]);
+    // An unconfigured project with old tagged tasks must keep their tag ID.
+    if (
+      legacy &&
+      tasks.some((task) =>
+        task.projectId === projectId && task.tagIds?.includes(legacy.id)
+      )
+    ) return legacy;
+    return named(title) || legacy || null;
+  }
   const DATE_SUGGESTIONS = [
     "today",
     "tomorrow",
@@ -296,7 +314,9 @@ const BoardCore = (() => {
       template === "workflow" ? { ...fallback, label: "Clarify" } : fallback,
       ...config.lanes.map((lane) => ({
         ...lane,
-        label: lane.label || tagById.get(lane.tagId)?.title || "Tag",
+        label: lane.label ||
+          WORKFLOW_LEGACY_TAGS[tagById.get(lane.tagId)?.title] ||
+          tagById.get(lane.tagId)?.title || "Tag",
       })),
       ...(template === "workflow" ? [] : [done]),
     ];
@@ -418,6 +438,8 @@ const BoardCore = (() => {
   return {
     SIMPLE_TAGS,
     WORKFLOW_TAGS,
+    WORKFLOW_LEGACY_TAGS,
+    existingPresetTag,
     dateSuggestions,
     resolveDateSuggestion,
     estimateSuggestions,

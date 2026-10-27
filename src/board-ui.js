@@ -142,9 +142,7 @@
       const lanes = [];
       for (const title of names) {
         // Reuse an existing tag; create only when the template is first selected.
-        let tag = tags.find((item) =>
-          item.title?.toLowerCase() === title.toLowerCase()
-        );
+        let tag = BoardCore.existingPresetTag(title, tags, tasks, projectId);
         if (!tag) {
           const id = await api.addTag({ title });
           tag = { id, title };

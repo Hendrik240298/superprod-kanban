@@ -137,6 +137,24 @@ Deno.test("one-line task entry parses #tags, @schedules and duration text", () =
     },
   );
   equal(
+    BoardCore.parseQuickAdd(
+      "Review #this-week #maybe-later",
+      [...allTags, { id: "week-slug", title: "This-Week" }, {
+        id: "later-slug",
+        title: "Maybe-Later",
+      }],
+      config,
+      "todo",
+      now,
+    ),
+    {
+      title: "Review",
+      tagIds: ["week-slug", "later-slug"],
+      schedule: {},
+      timeEstimate: null,
+    },
+  );
+  equal(
     BoardCore.parseQuickAdd("Work #Progress", allTags, config, "p", now).tagIds,
     [],
   );
@@ -252,6 +270,14 @@ Deno.test("creating in any lane always assigns project and uses completion rathe
 });
 
 Deno.test("workflow template has Clarify and six tag lanes, but no Done", () => {
+  equal(BoardCore.WORKFLOW_TAGS, [
+    "Backlog",
+    "This-Week",
+    "Doing",
+    "Waiting",
+    "Scheduled",
+    "Maybe-Later",
+  ]);
   const workflowTags = BoardCore.WORKFLOW_TAGS.map((title, i) => ({
     id: `w${i}`,
     title,
@@ -265,8 +291,40 @@ Deno.test("workflow template has Clarify and six tag lanes, but no Done", () => 
     ),
     [
       "Clarify",
-      ...BoardCore.WORKFLOW_TAGS,
+      "Backlog",
+      "This Week",
+      "Doing",
+      "Waiting",
+      "Scheduled",
+      "Maybe/Later",
     ],
+  );
+  equal(BoardCore.WORKFLOW_LEGACY_TAGS, {
+    "This-Week": "This Week",
+    "Maybe-Later": "Maybe/Later",
+  });
+  const legacy = { id: "old-week", title: "This Week" };
+  const slug = { id: "new-week", title: "This-Week" };
+  equal(
+    BoardCore.existingPresetTag("This-Week", [legacy, slug], [{
+      projectId: "p",
+      tagIds: [legacy.id],
+    }], "p"),
+    legacy,
+  );
+  equal(
+    BoardCore.existingPresetTag("This-Week", [legacy, slug], [], "p"),
+    slug,
+  );
+  equal(BoardCore.existingPresetTag("This-Week", [legacy], [], "p"), legacy);
+  equal(BoardCore.existingPresetTag("This-Week", [], [], "p"), null);
+  equal(
+    BoardCore.columns(
+      { lanes: [{ tagId: "w1", label: "This sprint" }] },
+      workflowTags,
+      "workflow",
+    ).at(-1).label,
+    "This sprint",
   );
   const cards = BoardCore.projectCards(
     [

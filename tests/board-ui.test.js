@@ -339,12 +339,25 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   if (values.get("template-p") !== "workflow" || tags.length !== 9) {
     throw new Error("Workflow template did not initialize its six tag lanes");
   }
+  if (
+    !tags.some((tag) => tag.title === "This-Week") ||
+    !tags.some((tag) => tag.title === "Maybe-Later") ||
+    tags.some((tag) => ["This Week", "Maybe/Later"].includes(tag.title))
+  ) {
+    throw new Error("New Workflow tag names must work as single # tokens");
+  }
   const lanes = descendants(
     app,
     (node) => node.tag === "section" && node.className === "lane",
   );
   if (lanes.length !== 7 || lanes[0].attributes["aria-label"] !== "Clarify") {
     throw new Error("Expected seven workflow lanes starting with Clarify");
+  }
+  if (
+    lanes[2].attributes["aria-label"] !== "This Week" ||
+    lanes[6].attributes["aria-label"] !== "Maybe/Later"
+  ) {
+    throw new Error("Workflow kept tag slugs in human-readable lane labels");
   }
   const cards = descendants(lanes[0], (node) => node.tag === "article");
   if (cards.length !== 2) throw new Error("Expected both tasks in Clarify");
