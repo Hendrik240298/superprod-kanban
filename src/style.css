@@ -85,8 +85,12 @@ select:focus-visible,
   padding-bottom: var(--s2, 16px);
 }
 .board:focus-visible {
-  outline-offset: -2px;
-  border-radius: 8px;
+  outline: none;
+}
+.board:focus-visible .lane:first-child .lane-header h2 {
+  text-decoration: underline;
+  text-decoration-color: var(--text-color-muted, #777);
+  text-underline-offset: 4px;
 }
 .lane {
   flex: 0 0 min(300px, 85vw);

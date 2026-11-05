@@ -65,6 +65,24 @@ try {
     ),
   });
   await frame.waitForSelector(".card");
+  await page.keyboard.press("Shift");
+  const boardFocus = await frame.locator(".board").evaluate((board) => {
+    board.focus();
+    return {
+      visible: board.matches(":focus-visible"),
+      outline: getComputedStyle(board).outlineStyle,
+      laneCue: getComputedStyle(board.querySelector(".lane-header h2"))
+        .textDecorationLine,
+    };
+  });
+  assert.equal(boardFocus.visible, true);
+  assert.equal(
+    boardFocus.outline,
+    "none",
+    "board focus must not frame the board",
+  );
+  assert.equal(boardFocus.laneCue, "underline", "keep a local focus cue");
+  console.log("PASS board keyboard focus without a full-board outline");
   const cdp = await context.newCDPSession(page);
   const touch = (type, x, y) =>
     cdp.send("Input.dispatchTouchEvent", {
