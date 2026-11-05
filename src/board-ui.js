@@ -24,6 +24,21 @@
   let lastG = 0;
   let activeMenu = null;
   let workflowMigration;
+  let touchContextUntil = 0;
+  let touchDrag = null;
+  let ignoreClickUntil = 0;
+
+  // Host dialogs return focus to the iframe, not to a card replaced by a
+  // background refresh. Restore our own remembered target without host DOM access.
+  window.addEventListener?.("focus", () => {
+    if (document.activeElement?.tagName !== "BODY" || !state.focusedCard) {
+      return;
+    }
+    const card = Array.from(document.querySelectorAll(".card")).find((node) =>
+      node.dataset.taskId === state.focusedCard.taskId
+    );
+    (card || document.querySelector(".board"))?.focus({ preventScroll: true });
+  });
 
   const el = (tag, className, text) => {
     const node = document.createElement(tag);
@@ -169,6 +184,8 @@
     const ctx = await api.getActiveWorkContext();
     if (token !== loadToken) return;
     if (ctx?.type !== "PROJECT") {
+      cancelTouchDrag();
+      closeMenu(false);
       state.ctx = null;
       app.textContent = "Open a project to see its Kanban board.";
       return;
@@ -280,6 +297,7 @@
 
   function render() {
     if (!state.ctx) return;
+    cancelTouchDrag();
     closeMenu();
     const restoreCard = document.activeElement?.classList.contains("card")
       ? state.focusedCard
@@ -1158,6 +1176,155 @@
     if (activeMenu && !activeMenu.node.contains(event.target)) closeMenu(false);
   });
 
+  function clearDropHints() {
+    for (const node of document.querySelectorAll(".lane, .card")) {
+      node.classList.remove("drop-target", "drop-before", "drop-after");
+    }
+  }
+
+  function cancelTouchDrag() {
+    if (!touchDrag) return;
+    clearTimeout(touchDrag.timer);
+    window.cancelAnimationFrame?.(touchDrag.frame);
+    touchDrag.preview?.remove();
+    touchDrag.card.classList.remove("touch-drag-source");
+    touchDrag.card.draggable = true;
+    if (touchDrag.active) ignoreClickUntil = Date.now() + 700;
+    touchContextUntil = Date.now() + 1500;
+    touchDrag = null;
+    clearDropHints();
+  }
+
+  function updateTouchTarget() {
+    const drag = touchDrag;
+    if (!drag?.active) return;
+    drag.preview.style.left = `${drag.x + 12}px`;
+    drag.preview.style.top = `${drag.y + 12}px`;
+    clearDropHints();
+    const lane = document.elementFromPoint(drag.x, drag.y)?.closest(".lane");
+    drag.lane = lane;
+    drag.beforeId = null;
+    if (!lane) return;
+    lane.classList.add("drop-target");
+    const cards = Array.from(lane.querySelectorAll(".card"))
+      .filter((card) => card !== drag.card);
+    const before = cards.find((card) =>
+      drag.y < card.getBoundingClientRect().top + card.offsetHeight / 2
+    );
+    drag.beforeId = before?.dataset.taskId || null;
+    if (before) before.classList.add("drop-before");
+    else cards.at(-1)?.classList.add("drop-after");
+  }
+
+  function scrollTouchDrag() {
+    if (!touchDrag?.active) return;
+    const { x, y } = touchDrag;
+    const board = document.querySelector(".board");
+    const edgeSpeed = (point, start, end) => {
+      if (point < start || point > end) return 0;
+      return point < start + 40 ? -8 : point > end - 40 ? 8 : 0;
+    };
+    const rect = board.getBoundingClientRect();
+    board.scrollLeft += edgeSpeed(x, rect.left, rect.right);
+    const lane = document.elementFromPoint(x, y)?.closest(".lane");
+    const cards = lane?.querySelector(".cards");
+    if (cards) {
+      const bounds = cards.getBoundingClientRect();
+      cards.scrollTop += edgeSpeed(y, bounds.top, bounds.bottom);
+    }
+    updateTouchTarget();
+    touchDrag.frame = window.requestAnimationFrame?.(scrollTouchDrag);
+  }
+
+  function startTouchDrag(event, card, task) {
+    touchContextUntil = Date.now() + 1500;
+    cancelTouchDrag();
+    if (
+      state.busy || task.parentId || event.touches.length !== 1 ||
+      event.target?.closest?.(
+        "button, input, textarea, select, [contenteditable]",
+      )
+    ) return;
+    const touch = event.touches[0];
+    const drag = {
+      card,
+      taskId: task.id,
+      identifier: touch.identifier,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      x: touch.clientX,
+      y: touch.clientY,
+      active: false,
+      moved: false,
+    };
+    touchDrag = drag;
+    // Do not let Android start a competing native HTML drag session.
+    card.draggable = false;
+    drag.timer = setTimeout(() => {
+      if (touchDrag !== drag || !card.isConnected) return;
+      closeMenu(false);
+      drag.active = true;
+      card.classList.add("touch-drag-source");
+      drag.preview = el(
+        "div",
+        "touch-drag-preview",
+        task.title || "Untitled task",
+      );
+      drag.preview.setAttribute("aria-hidden", "true");
+      document.querySelector(".shell").append(drag.preview);
+      updateTouchTarget();
+      drag.frame = window.requestAnimationFrame?.(scrollTouchDrag);
+    }, 350);
+  }
+
+  document.addEventListener("touchmove", (event) => {
+    const drag = touchDrag;
+    if (!drag) return;
+    const touch = Array.from(event.touches).find((entry) =>
+      entry.identifier === drag.identifier
+    );
+    if (!touch || event.touches.length !== 1) {
+      cancelTouchDrag();
+      return;
+    }
+    drag.x = touch.clientX;
+    drag.y = touch.clientY;
+    const moved = Math.hypot(drag.x - drag.startX, drag.y - drag.startY) > 10;
+    if (!drag.active) {
+      // A swipe before the hold threshold belongs to native scrolling.
+      if (moved) cancelTouchDrag();
+      return;
+    }
+    if (event.cancelable) event.preventDefault();
+    drag.moved ||= moved;
+    updateTouchTarget();
+  }, { passive: false });
+  document.addEventListener("touchend", (event) => {
+    if (!touchDrag) return;
+    const drag = touchDrag;
+    const touch = Array.from(event.changedTouches).find((entry) =>
+      entry.identifier === drag.identifier
+    );
+    if (!touch) return;
+    drag.x = touch.clientX;
+    drag.y = touch.clientY;
+    updateTouchTarget();
+    const laneId = drag.lane?.dataset.laneId;
+    const shouldMove = drag.active && drag.moved && laneId;
+    cancelTouchDrag();
+    if (shouldMove) move(drag.taskId, laneId, drag.beforeId);
+  });
+  document.addEventListener("touchcancel", cancelTouchDrag);
+  document.addEventListener("touchstart", (event) => {
+    if (event.touches.length > 1) cancelTouchDrag();
+  }, { passive: true });
+  document.addEventListener("click", (event) => {
+    if (Date.now() < ignoreClickUntil && event.detail !== 0) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, true);
+
   function renderCard(task, currentLane, nextCardId) {
     const card = el("article", "card");
     card.dataset.taskId = task.id;
@@ -1173,17 +1340,27 @@
         task.title || "Untitled task"
       }. Enter for details, m for actions, d to complete`,
     );
-    const openDetails = () => {
+    const openDetails = (event) => {
+      if (event && Date.now() < ignoreClickUntil && event.detail !== 0) return;
       void api.selectTask(task.id).catch((error) =>
         status(String(error), true)
       );
     };
     card.addEventListener("click", openDetails);
+    card.addEventListener("touchstart", (event) => {
+      startTouchDrag(event, card, task);
+    }, { passive: true });
     card.addEventListener("contextmenu", (event) => {
       if (
         event.target?.closest?.("input, textarea, select, [contenteditable]")
       ) return;
       event.preventDefault();
+      // Android emits contextmenu for the same hold used to start dragging.
+      // Older WebViews report a MouseEvent without pointerType for that hold.
+      if (
+        event.pointerType === "touch" ||
+        (!event.pointerType && (touchDrag || Date.now() < touchContextUntil))
+      ) return;
       openCardMenu(card, task, currentLane, event.clientX, event.clientY);
     });
     card.addEventListener("keydown", (event) => {
@@ -1398,6 +1575,19 @@
       badge.append(icon, date);
       heading.append(badge);
     }
+    const actions = control("", (event) => {
+      event.stopPropagation();
+      const rect = actions.getBoundingClientRect();
+      openCardMenu(card, task, currentLane, rect.left, rect.bottom);
+    }, "card-actions");
+    actions.setAttribute(
+      "aria-label",
+      `Actions for ${task.title || "Untitled task"}`,
+    );
+    actions.setAttribute("aria-haspopup", "menu");
+    actions.title = "Task actions";
+    actions.append(menuIcon("dots"));
+    heading.append(actions);
     card.append(heading);
     if (meta.children.length) card.append(meta);
     return card;

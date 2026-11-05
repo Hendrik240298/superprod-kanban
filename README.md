@@ -18,6 +18,8 @@ There is also a build artifact on every successful [CI run](https://github.com/H
 
 ## Use
 
+**On Android/touch screens (v0.7.4):** Tap a card to open native task details. Hold the card for about 350 ms, then drag it between lanes or above/below another card; release to save the move. A floating title preview and lane/insertion highlights show the destination. Hold near the board's left/right edge or a lane's top/bottom edge while dragging to auto-scroll. Swiping immediately still scrolls normally. Long-press no longer opens the actions menu: tap the card's **⋯** button instead (also available on desktop). Desktop right-click and keyboard `m` / Shift+F10 still open that menu. Cancellation, a stationary hold, or releasing outside a lane does not move the task. This change does not replace or reposition the host's native task-details panel or navigation sidebar.
+
 Choose a template under **Configure lanes**:
 
 | Template | Lanes | Completed tasks |
@@ -73,6 +75,12 @@ Enter accepts a visible suggestion; press Enter again to create the task. Escape
 
 ## Build from source
 
+### Optional native task-details popup
+
+Task Details Popup is a separate installable plugin, maintained in the AI workspace at `projects/superprod-task-popup/`. Project Kanban continues to open the native editor through `selectTask()`. No patched application or replacement web app is distributed or required. The earlier host-patch experiment has been removed. Kanban also restores its remembered card when its iframe regains focus after a background refresh.
+
+### Plugin build
+
 Requires Python 3 and Deno 2. From the **repository root**:
 
 ```sh
@@ -85,6 +93,19 @@ python3 build.py
 Install `dist/project-kanban.zip` using the instructions above. The ZIP contains `manifest.json`, `plugin.js`, and a self-contained `index.html` at its root. The [CI workflow](.github/workflows/release.yml) runs these checks on pushes and pull requests, uploads a short-lived build artifact, and publishes the ZIP as a GitHub Release when a version tag such as `v0.7.3` is pushed. Tags must match `src/manifest.json`'s version.
 
 ## Verify on a disposable project
+
+Automated Chromium touch checks are also available in `tests/browser/touch-drag.mjs`. They exercise real touch input inside an iframe with a disposable **mock PluginAPI**; they are not an Android WebView or a real Super Productivity integration test. Node.js and an optional Playwright install are required. From the repository root, keep these test-only dependencies outside the project:
+
+```sh
+npm install --prefix "$TMPDIR/kanban-browser" --no-audit --no-fund playwright
+PLAYWRIGHT_BROWSERS_PATH="$TMPDIR/kanban-browser/browsers" \
+  "$TMPDIR/kanban-browser/node_modules/.bin/playwright" install chromium
+PLAYWRIGHT_MODULE="$TMPDIR/kanban-browser/node_modules/playwright/index.mjs" \
+  PLAYWRIGHT_BROWSERS_PATH="$TMPDIR/kanban-browser/browsers" \
+  node tests/browser/touch-drag.mjs
+```
+
+Manual app checks:
 
 1. Make projects A and B. Choose Kanban for A and leave B on List. Switch A → B → A and restart; both should retain their views.
 2. Add a task in each lane of A and verify every task belongs to A rather than Inbox/B. Move an existing task with an unrelated tag through each lane and check the tag survives; press `d` to complete it and check it disappears while remaining in the native task list.
@@ -101,6 +122,8 @@ Install `dist/project-kanban.zip` using the instructions above. The ZIP contains
 13. Switch from an old Classic board to Simple: old In Progress cards should be visible in Backlog without any automatic tag changes. Move a card to Doing and check that its shared Doing tag is applied; completed tasks should not appear in either lane.
 14. Right-click a card and try each supported action on a disposable project, including scheduling a previously timed task, creating a subtask, toggling a non-lane tag, moving to another project, and moving an untagged card to the top/bottom without changing its tags. Confirm that Cancel preserves a task in the Delete submenu and Delete removes it. Use `m` or Shift+F10, then ↑/↓, Enter, Escape and the displayed menu-only shortcuts to check keyboard access; `Backspace` must ask for confirmation. Compare the compact menu with List in the same theme. Finish one card via the round check button; verify it disappears and remains available in List. Check the List-marked fallback rows, and reopen the board after switching light/dark themes to check menu colors.
 15. On an older Workflow project, confirm its saved `This Week` and `Maybe/Later` lanes now use `This-Week` and `Maybe-Later`, while tasks with only legacy tags appear in Clarify. Drag a task into the new lane and check its old tag is removed, the new tag is added, and unrelated tags survive. Check a second project without opening its board first; its saved lane configuration should also be updated. Try native `#this-week` and `#maybe-later` entry.
+
+16. On Android, tap a card for details and tap **⋯** for actions. Hold a card, then drag it into an empty lane and above/below another card. No menu or task-details popup should appear during the drag or on release. Verify immediate swipes still scroll horizontally/vertically, dragging near edges auto-scrolls, and a cancelled drag or release outside a lane makes no changes. Check that unrelated tags and saved lane order survive reopening. Compare desktop drag, right-click and keyboard actions after upgrading.
 
 ## Limits
 

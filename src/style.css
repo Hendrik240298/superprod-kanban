@@ -135,6 +135,31 @@ select:focus-visible,
 .card[draggable="true"] {
   cursor: grab;
 }
+.card {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.card input {
+  -webkit-user-select: text;
+  user-select: text;
+}
+.touch-drag-source {
+  opacity: .45;
+}
+.touch-drag-preview {
+  position: fixed;
+  z-index: 30;
+  pointer-events: none;
+  max-width: min(260px, 65vw);
+  padding: 12px;
+  border: 2px solid var(--c-primary, #7559d9);
+  border-radius: 14px;
+  background: var(--card-bg, #fff);
+  color: var(--text-color, #292929);
+  box-shadow: var(--whiteframe-shadow-8dp, 0 6px 24px #0004);
+  overflow-wrap: anywhere;
+}
 .card.drop-before {
   border-top: 3px solid var(--c-primary, #7559d9);
 }
@@ -213,6 +238,31 @@ select:focus-visible,
 .card-complete:hover::after,
 .card-complete:focus-visible::after {
   color: currentColor;
+}
+.card-actions {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-color-muted, #777);
+}
+.card-actions svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+.card-actions:hover {
+  background: var(--bg-lighter, #efefef);
+}
+@media (pointer: coarse) {
+  .card-actions {
+    width: 44px;
+    height: 44px;
+    padding: 12px;
+  }
 }
 .card-menu {
   position: fixed;

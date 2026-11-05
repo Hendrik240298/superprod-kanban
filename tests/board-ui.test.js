@@ -1,17 +1,333 @@
 import { BoardCore } from "../src/board-core.js";
 
+async function touchBoard() {
+  const app = new Node("main");
+  Node.root = app;
+  const listeners = new Map();
+  const timers = new Map();
+  let timerId = 0;
+  const tasks = [
+    { id: "a", title: "First", projectId: "p", tagIds: ["extra"] },
+    { id: "b", title: "Second", projectId: "p", tagIds: [] },
+  ];
+  const values = new Map();
+  const selected = [];
+  const hooks = new Map();
+  const context = { id: "p", type: "PROJECT" };
+  const document = {
+    createElement: (tag) => new Node(tag),
+    createElementNS: (_ns, tag) => new Node(tag),
+    addEventListener: (key, fn) => listeners.set(key, fn),
+    querySelectorAll: (selector) => app.querySelectorAll(selector),
+    querySelector: (selector) => app.querySelector(selector),
+    getElementById: (id) => id === "app" ? app : null,
+    get activeElement() {
+      return Node.activeElement;
+    },
+    elementFromPoint: () => document.hitTarget,
+  };
+  const api = {
+    Hooks: { ANY_TASK_UPDATE: "task", WORK_CONTEXT_CHANGE: "context" },
+    registerHook: (key, fn) => hooks.set(key, fn),
+    getActiveWorkContext: async () => context,
+    getAllProjects: async () => [{ id: "p", title: "Test" }],
+    getAllTags: async () => [
+      { id: "backlog", title: "Backlog" },
+      { id: "doing", title: "Doing" },
+    ],
+    getTasks: async () => tasks,
+    loadSyncedData: async (key) => values.get(key),
+    persistDataSynced: async (value, key) => values.set(key, value),
+    updateTask: async (id, patch) =>
+      Object.assign(tasks.find((task) => task.id === id), patch),
+    selectTask: async (id) => selected.push(id),
+  };
+  const source = await Deno.readTextFile(
+    new URL("../src/board-ui.js", import.meta.url),
+  );
+  new Function(
+    "window",
+    "document",
+    "BoardCore",
+    "setTimeout",
+    "clearTimeout",
+    source,
+  )(
+    {
+      PluginAPI: api,
+      addEventListener: (key, fn) => listeners.set(`window:${key}`, fn),
+    },
+    document,
+    BoardCore,
+    (fn) => {
+      timers.set(++timerId, fn);
+      return timerId;
+    },
+    (id) => timers.delete(id),
+  );
+  await flush();
+  return {
+    app,
+    document,
+    tasks,
+    values,
+    selected,
+    hooks,
+    context,
+    card: () => app.querySelector(".card"),
+    fire: (key, event) => listeners.get(key)?.(event),
+    hold: () => {
+      const callbacks = [...timers.values()];
+      timers.clear();
+      callbacks.forEach((fn) => fn());
+    },
+    touch: (x = 30, y = 30, identifier = 1) => ({
+      identifier,
+      clientX: x,
+      clientY: y,
+    }),
+  };
+}
+
+Deno.test("iframe refocus restores the card after a background refresh", async () => {
+  const board = await touchBoard();
+  board.card().focus();
+  Node.activeElement = new Node("body");
+  board.hooks.get("task")();
+  board.hold();
+  await flush();
+  board.fire("window:focus");
+  if (Node.activeElement !== board.card()) {
+    throw new Error(
+      "Returning from native details lost the focused Kanban card",
+    );
+  }
+});
+
+Deno.test("Android long-press does not open the card context menu", async () => {
+  const board = await touchBoard();
+  const card = board.card();
+  card.fire("touchstart", { target: card, touches: [board.touch()] });
+  card.fire("contextmenu", {
+    target: card,
+    pointerType: "touch",
+    preventDefault() {},
+    clientX: 30,
+    clientY: 30,
+  });
+  if (board.app.querySelector(".card-menu")) {
+    throw new Error(
+      "Android long-press opened actions instead of allowing drag",
+    );
+  }
+});
+
+Deno.test("cards have explicit actions without opening task details", async () => {
+  const board = await touchBoard();
+  const card = board.card();
+  const button = card.querySelector(".card-actions");
+  if (!button || button.getAttribute("aria-haspopup") !== "menu") {
+    throw new Error("Missing explicit task-actions button for touch users");
+  }
+  let stopped = false;
+  button.fire("click", {
+    stopPropagation() {
+      stopped = true;
+    },
+  });
+  if (
+    !board.app.querySelector(".card-menu") || !stopped || board.selected.length
+  ) {
+    throw new Error("Actions button did not open only the actions menu");
+  }
+});
+
+Deno.test("hold then drag moves a touch card without opening details", async () => {
+  const board = await touchBoard();
+  const card = board.card();
+  const destination = board.app.querySelectorAll(".lane")[1];
+  board.document.hitTarget = destination;
+  card.fire("touchstart", { target: card, touches: [board.touch()] });
+  board.hold();
+  if (!board.app.querySelector(".touch-drag-preview")) {
+    throw new Error("Holding did not lift the card for touch drag");
+  }
+  let prevented = false;
+  board.fire("touchmove", {
+    touches: [board.touch(200, 80)],
+    cancelable: true,
+    preventDefault() {
+      prevented = true;
+    },
+  });
+  board.fire("touchend", { changedTouches: [board.touch(200, 80)] });
+  card.fire("click", { preventDefault() {}, stopPropagation() {} });
+  await flush();
+  if (
+    !prevented || board.selected.length ||
+    JSON.stringify(board.tasks[0].tagIds) !==
+      JSON.stringify(["extra", "doing"]) ||
+    JSON.parse(board.values.get("order-simple-p") || "{}").doing?.[0] !== "a" ||
+    board.app.querySelector(".touch-drag-preview")
+  ) {
+    throw new Error(
+      "Touch drop failed, lost unrelated tags, or opened task details",
+    );
+  }
+});
+
+Deno.test("leaving a project cancels a lifted touch card", async () => {
+  const board = await touchBoard();
+  const card = board.card();
+  card.fire("touchstart", { target: card, touches: [board.touch()] });
+  board.hold();
+  board.context.type = "TAG";
+  board.hooks.get("context")();
+  board.hold();
+  await flush();
+  if (card.classList.contains("touch-drag-source") || !card.draggable) {
+    throw new Error("Leaving project left a stale active touch drag");
+  }
+});
+
+Deno.test("touch reordering preserves unrelated task tags", async () => {
+  const board = await touchBoard();
+  const card = board.card();
+  board.document.hitTarget = card.closest(".lane");
+  card.fire("touchstart", { target: card, touches: [board.touch()] });
+  board.hold();
+  board.fire("touchmove", {
+    touches: [board.touch(30, 90)],
+    cancelable: true,
+    preventDefault() {},
+  });
+  board.fire("touchend", { changedTouches: [board.touch(30, 90)] });
+  await flush();
+  if (
+    JSON.stringify(JSON.parse(board.values.get("order-simple-p")).backlog) !==
+      '["b","a"]' ||
+    !board.tasks[0].tagIds.includes("extra")
+  ) throw new Error("Touch reorder failed or changed task metadata");
+});
+
+Deno.test("swipe before hold leaves native scrolling alone", async () => {
+  const board = await touchBoard();
+  const card = board.card();
+  card.fire("touchstart", { target: card, touches: [board.touch()] });
+  board.fire("touchmove", {
+    touches: [board.touch(30, 100)],
+    cancelable: true,
+    preventDefault() {
+      throw new Error("Swipe scrolling was blocked");
+    },
+  });
+  board.hold();
+  if (
+    board.app.querySelector(".touch-drag-preview") || !card.draggable ||
+    board.values.size
+  ) {
+    throw new Error("Swipe activated a drag instead of scrolling");
+  }
+});
+
+Deno.test("short taps still open details and do not move tasks", async () => {
+  const board = await touchBoard();
+  const card = board.card();
+  card.fire("touchstart", { target: card, touches: [board.touch()] });
+  board.fire("touchend", { changedTouches: [board.touch()] });
+  card.fire("click", { detail: 1 });
+  await flush();
+  if (JSON.stringify(board.selected) !== '["a"]' || board.values.size) {
+    throw new Error("Ordinary touch tap was lost or moved a task");
+  }
+});
+
+Deno.test("cancelled, stationary, outside and multi-touch drags do not persist moves", async () => {
+  for (const ending of ["touchcancel", "stationary", "outside", "multi"]) {
+    const board = await touchBoard();
+    const card = board.card();
+    card.fire("touchstart", { target: card, touches: [board.touch()] });
+    board.hold();
+    if (ending === "multi") {
+      board.fire("touchstart", {
+        touches: [board.touch(), board.touch(40, 40, 2)],
+      });
+    } else if (ending === "touchcancel") board.fire("touchcancel", {});
+    else {
+      if (ending === "outside") {
+        board.fire("touchmove", {
+          touches: [board.touch(300, 100)],
+          cancelable: true,
+          preventDefault() {},
+        });
+      }
+      board.fire("touchend", { changedTouches: [board.touch()] });
+    }
+    board.hold();
+    if (
+      board.values.size || board.app.querySelector(".touch-drag-preview") ||
+      !card.draggable
+    ) {
+      throw new Error(
+        `${ending} drag persisted a move or left stale drag state`,
+      );
+    }
+  }
+});
+
+Deno.test("touch on controls never starts dragging; mouse right-click still works", async () => {
+  const board = await touchBoard();
+  const card = board.card();
+  for (
+    const selector of [".card-actions", ".card-complete", ".card-title-input"]
+  ) {
+    card.fire("touchstart", {
+      target: card.querySelector(selector),
+      touches: [board.touch()],
+    });
+    board.hold();
+    if (board.app.querySelector(".touch-drag-preview")) {
+      throw new Error(`${selector} started a drag`);
+    }
+  }
+  card.fire("contextmenu", { target: card, preventDefault() {} });
+  if (board.app.querySelector(".card-menu")) {
+    throw new Error("Legacy touch contextmenu opened actions");
+  }
+  card.fire("contextmenu", {
+    target: card,
+    pointerType: "mouse",
+    preventDefault() {},
+  });
+  if (!board.app.querySelector(".card-menu")) {
+    throw new Error("Mouse right-click stopped working after touch input");
+  }
+});
+
 class Node {
   constructor(tag = "div") {
     this.tag = tag;
+    this.tagName = tag.toUpperCase();
     this.children = [];
     this.listeners = {};
     this.attributes = {};
     this.textContent = "";
     this.className = "";
     this.classList = {
-      add() {},
-      remove() {},
-      toggle() {},
+      add: (...names) => {
+        this.className = [
+          ...new Set([...this.className.split(" ").filter(Boolean), ...names]),
+        ].join(" ");
+      },
+      remove: (...names) => {
+        this.className = this.className.split(" ").filter((name) =>
+          !names.includes(name)
+        ).join(" ");
+      },
+      toggle: (name, force) => {
+        if (force ?? !this.classList.contains(name)) this.classList.add(name);
+        else this.classList.remove(name);
+      },
       contains: (name) => this.className.split(" ").includes(name),
     };
     this.dataset = {};
@@ -93,7 +409,16 @@ class Node {
     return this.querySelectorAll(selector)[0] || null;
   }
   closest(selector) {
-    return selector.split(", ").includes(this.tag) ? this : null;
+    if (
+      selector.split(", ").some((part) =>
+        part.startsWith(".")
+          ? this.classList.contains(part.slice(1))
+          : part === this.tag
+      )
+    ) return this;
+    const parent =
+      descendants(Node.root, (node) => node.children.includes(this))[0];
+    return parent?.closest(selector) || null;
   }
   scrollIntoView() {}
   setSelectionRange(start, end) {

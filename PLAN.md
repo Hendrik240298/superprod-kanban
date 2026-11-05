@@ -4,6 +4,8 @@ Status: the tag-based plugin is implemented in `src/`; screenshots confirm the b
 
 ## Goal and scope
 
+Local v0.7.4 adds dedicated touch hold-and-drag with native swipe scrolling, drag previews, edge auto-scroll, cancellation cleanup, and a separate card ⋯ actions button. Android long-press context menus are suppressed; desktop HTML drag/drop, right-click and keyboard access are retained. Deno regressions and real Chromium touch-input checks in an iframe pass, using a mock PluginAPI. Physical Android/Super Productivity verification remains required. Task-details popup presentation is a separate installable plugin under `projects/superprod-task-popup/`; Hendrik rejects patched apps, so the previous host integration and patched web build have been removed. Kanban still opens native details through `selectTask()`.
+
 Give every Super Productivity project an opt-in List / Kanban toggle. The Kanban view is scoped automatically to the active project, so creating tasks and switching projects never require editing a project's filter in each lane. Each project remembers its preferred view and its lane configuration. The plugin should look at home beside the built-in Boards UI, but is a separate view.
 
 First release: tag-based lanes only. Do not attempt to turn project sections into lanes, auto-generate built-in Boards, patch app internals, or reproduce every feature of the existing Boards screen.
