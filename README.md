@@ -12,11 +12,19 @@ Requires Super Productivity **18.7.0 or newer** (developed against the published
 2. In Super Productivity, open **Settings → Plugins → Choose Plugin File** and select the ZIP.
 3. Open a project and use **List / Kanban** in its project header. The selected view is remembered per project.
 
-For a keyboard toggle, go to **Settings → Keyboard** and assign `Shift+V` to **Toggle project List / Kanban** under Plugin Shortcuts. The app controls this binding; the plugin cannot set it automatically. Inside Kanban, `Shift+V` is mirrored when you are not typing, and `Ctrl+Alt+K` exits even from a text field (except when the key is used as AltGr). The iframe cannot read arbitrary bindings from Keyboard Settings: another assigned combination may work outside the board but not inside it. The toggle only works in project contexts.
+For a keyboard toggle, go to **Settings → Keyboard** and assign `Shift+V` to **Toggle project List / Kanban** under Plugin Shortcuts. The app controls this binding; the plugin cannot set it automatically. Inside Kanban, `Shift+V` is mirrored when you are not typing, and `Ctrl+Alt+K` exits even from a text field (except when the key is used as AltGr). With **Keyboard Ergonomics v0.2.5+**, your configured List toggle, switcher, sidebar, Inbox and focus-setup bindings also work inside Kanban when not typing. Without that companion, only the board-local bindings work. The toggle only works in project contexts.
 
 There is also a build artifact on every successful [CI run](https://github.com/Hendrik240298/superprod-kanban/actions/workflows/release.yml), but GitHub requires sign-in for artifacts and they expire. The Release ZIP is the stable, direct download.
 
 ## Use
+
+**v0.8.1 keyboard/polish:** No persistent quick-add instruction banner, completion banner or board-local Undo. Card/menu keyboard focus frames stay inside their controls rather than clipping at scroll edges. Open actions with `m`, use `j/k` to move, `l` to enter a submenu and `h` to return; arrows and Enter still work. Escape returns to the main menu, then closes it. These keys never intercept text in menu forms. The optional Keyboard Ergonomics v0.2.5 companion honors configured plugin shortcuts and **Go to Today** inside the board. Hendrik's `Shift+I` goes to Inbox and `Shift+T` goes to Today; neither schedules a task. Native task-row shortcuts remain outside this integration.
+
+**v0.8.0 reliability pass:** Holding `d` completes only the intended card; release and press again for another. Title edits save on Enter or valid blur, Escape cancels before submission, and invalid/failed/busy saves keep the visible draft. An accepted title save is read-only until it finishes, preventing Enter/blur duplicates. Same-project refresh keeps open menu forms, their validation, draft and focus; task/project changes are revalidated before a write.
+
+**Quiet completion:** Check the card's circle or press `d` to complete it. The card disappears without a completion banner or board-local Undo feature. Completed tasks remain in the app; use native List/details to reopen one. Native app Undo is unchanged.
+
+**Native focus setup:** On hosts exposing `startTracking` and `dispatchAction`, **Open focus setup** starts task time tracking and opens the native focus overlay. It does **not** dispatch a focus-session timer start; choose/start that session in native setup. The plugin requests these two permissions explicitly. The current allowed overlay action is awaited; older overlay naming is tried only after rejection. If both fail, feedback explicitly says tracking already started and offers **Open in List for focus…** without pretending to roll tracking back. Hosts without those methods show the List fallback directly. Allowed-action/iframe source was checked in the unmodified local host fixture; installed Electron/Android verification is still required.
 
 **On Android/touch screens (v0.7.4):** Tap a card to open native task details. Hold the card for about 350 ms, then drag it between lanes or above/below another card; release to save the move. A floating title preview and lane/insertion highlights show the destination. Hold near the board's left/right edge or a lane's top/bottom edge while dragging to auto-scroll. Swiping immediately still scrolls normally. Long-press no longer opens the actions menu: tap the card's **⋯** button instead (also available on desktop). Desktop right-click and keyboard `m` / Shift+F10 still open that menu. Cancellation, a stationary hold, or releasing outside a lane does not move the task. This change does not replace or reposition the host's native task-details panel or navigation sidebar.
 
@@ -35,13 +43,13 @@ In **Configure lanes**, select a template. For Workflow, you can also add or cre
 
 Drag cards between lanes, or above/below another card to reorder tasks inside a lane. This order is stored by the plugin per project and template; it does not reorder the native task list. Click a card (or focus it and press Enter/Space) to open native task details. **Finish a task** with the small circle beside the first line of its title, or focus the card and press `d`: it disappears from Kanban but remains in the native task list. Right-click a card for a task-actions menu matching the shape of the native List menu. It is a **plugin-local recreation**, not the host's actual menu. To move a task to a different tag lane from the sidebar, remove its old lane tag as well as adding the new one; drag-and-drop handles this automatically. When present, a right-aligned calendar/date (or clock/time for today) and time estimate follow the app's Boards card style; hover the schedule for its full date and time. **Subtasks do not get separate cards**; their parent card retains the subtask-count chip, and opening the parent shows its subtasks in native task details.
 
-**Right-click actions:** The top icons schedule for today/tomorrow, open List for native backlog movement, choose an all-day date, or clear the schedule. The rows move a card to the top/bottom of its **board-local** lane, create a subtask, set/clear an estimate, toggle non-lane tags, move to another project, or delete the task **and its subtasks** after explicit confirmation. With the menu open, `A` opens Add subtask, `T` Estimate, `G` Toggle tags, `E` Move to project, and `Backspace` the delete *confirmation*; none of these shortcuts delete immediately. Add subtask opens its native details after creation. For focus sessions, full duplication (including subtasks), and priority, the row is marked **List**: selecting it returns to List with the task selected, where you can use the native action. Recurring tasks also go to List for project moves, avoiding an unexpected move of every repeat instance. These fallbacks do not perform the named action automatically. The plugin cannot invoke the original host menu from an iframe. Menu colors and fonts use Super Productivity's injected theme tokens; reopen the board if a theme change is not reflected immediately.
+**Right-click actions:** The top icons schedule for today/tomorrow, open List for native backlog movement, choose an all-day date, or clear the schedule. The rows move a card to the top/bottom of its **board-local** lane, create a subtask, set/clear an estimate, toggle non-lane tags, move to another project, or delete the task **and its subtasks** after explicit confirmation. With the menu open, `A` opens Add subtask, `T` Estimate, `G` Toggle tags, `E` Move to project, and `Backspace` the delete *confirmation*; none of these shortcuts delete immediately. Add subtask opens its native details after creation. Full duplication (including subtasks) and priority use explicitly navigation-labelled **List ↗** rows: selecting one returns to List with the task selected, where you can perform the native action. Focus setup uses the supported API when available, otherwise an explicit List fallback. Recurring tasks also go to List for project moves, avoiding an unexpected move of every repeat instance. These fallbacks do not perform the named action automatically. The plugin cannot invoke the original host menu from an iframe. Menu colors and fonts use Super Productivity's injected theme tokens; reopen the board if a theme change is not reflected immediately.
 
-Native task-row shortcuts such as `Shift+T` (move the focused task to Today) are not available while the Kanban iframe has focus: its cards are not native task rows. Use native task details or switch back to List for those actions. The plugin does not forward native task-row shortcuts into the iframe.
+Native task-only shortcuts are not generically forwarded: Kanban cards are not native task rows. Use the board's supported actions, native task details or List for those operations. With Keyboard Ergonomics v0.2.5+, configured **Go to Today** is navigation (normally `Shift+T`), not the separate native **Schedule task for today** action, even if the host assigns both the same key.
 
 **Keyboard focus on the board:** On opening Kanban, the board itself is focused. Press `j` to focus the first card. From a card, Escape returns to board focus without leaving Kanban; `j` enters card navigation again. This is a focus distinction, not a switch back to the host: Super Productivity’s native shortcuts still do not reach the host while the iframe has focus. `Shift+V` returns to List from board/card focus; `Ctrl+Alt+K` also works while typing. In quick-add, Escape closes suggestions first, then returns to the card, then to board focus.
 
-**Keyboard navigation:** Use `j`/`k` for the next/previous card in its lane, `h`/`l` for the nearest card in the previous/next nonempty lane, and `gg`/`G` for the first/last card in the lane. Hold Shift with `H`/`L` to move the card one lane left/right (including empty lanes), or with `K`/`J` to reorder it up/down within its lane. Moves update lane tags like dragging; subtasks still need native task details. Enter/Space opens native task details; `m` or Shift+F10 opens the card's actions menu (↑/↓ navigates it, Escape closes it). Press `e` to edit the card’s title in place: Enter saves, Escape cancels, and focus returns to the card. `#`, `@`, and duration suggestions also work here (for example, `Review @tomorrow`); selected shortcuts are removed from the title and applied to the task. Existing tags, schedule, and estimate remain unless you explicitly supply a replacement. To *remove* metadata, use native task details. `a` or `i` focuses that lane’s add input; `d` finishes the focused card. Press `?` for a small on-demand reminder. Navigation keys never act while typing in a field or editing lane settings. Focus is restored after board refresh when possible, and after adding a task it returns to that lane’s input.
+**Keyboard navigation:** Use `j`/`k` for the next/previous card in its lane, `h`/`l` for the nearest card in the previous/next nonempty lane, and `gg`/`G` for the first/last card in the lane. Hold Shift with `H`/`L` to move the card one lane left/right (including empty lanes), or with `K`/`J` to reorder it up/down within its lane. Moves update lane tags like dragging; subtasks still need native task details. Enter/Space opens native task details; `m` or Shift+F10 opens the card's actions menu (↑/↓ navigates it, Escape closes it). Press `e` to edit the card’s title in place: Enter or valid blur saves, Escape cancels before submission, and an Enter save returns focus to the card. Invalid, failed or busy saves keep the draft visible for correction/retry. `#`, `@`, and duration suggestions also work here (for example, `Review @tomorrow`); selected shortcuts are removed from the title and applied to the task. Existing tags, schedule, and estimate remain unless you explicitly supply a replacement. To *remove* metadata, use native task details. `a` or `i` focuses that lane’s add input; `d` finishes the focused card. Press `?` for a small on-demand reminder. Navigation keys never act while typing in a field or editing lane settings. Focus is restored after board refresh when possible, and after adding a task it returns to that lane’s input.
 
 ### Keyboard shortcuts
 
@@ -53,10 +61,10 @@ Native task-row shortcuts such as `Shift+T` (move the focused task to Today) are
 | `gg` / `G` | First / last card in the lane |
 | `Shift+H` / `Shift+L` | Move the focused card to the previous / next lane |
 | `Shift+K` / `Shift+J` | Move the focused card up / down in its lane |
-| `d` | **Finish** the focused task (`isDone`); it disappears from both boards. Reopen it in List/native details to undo. |
-| `m` / `Shift+F10` | Open the card's actions menu; ↑/↓ navigate, Enter selects, Escape closes |
+| `d` | **Finish** the focused task (`isDone`); auto-repeat is ignored. No completion banner. Reopen completed tasks in native List/details. |
+| `m` / `Shift+F10` | Open actions; `j/k` or ↑/↓ navigate, `l` or → enters a submenu, `h` or ← returns, Enter selects, Escape backs out/closes |
 | `Enter` / `Space` | Open the focused task in native details (including its subtasks) |
-| `e` | Edit the focused card inline; Enter saves, Escape cancels |
+| `e` | Edit the focused card inline; Enter/valid blur saves, Escape cancels before submission; rejected saves keep the draft |
 | `a` / `i` | Focus that lane's quick-add input |
 | `Escape` | From a card, return to board focus; in quick-add, close suggestions first |
 | `?` | Show/hide the on-board shortcut hint |
@@ -87,10 +95,11 @@ Requires Python 3 and Deno 2. From the **repository root**:
 deno fmt --check src/ tests/
 deno check src/board-core.js src/board-ui.js src/plugin.js
 deno test --allow-read tests/
+python3 -m unittest discover -s tests -p test_build.py -v
 python3 build.py
 ```
 
-Install `dist/project-kanban.zip` using the instructions above. The ZIP contains `manifest.json`, `plugin.js`, and a self-contained `index.html` at its root. The [CI workflow](.github/workflows/release.yml) runs these checks on pushes and pull requests, uploads a short-lived build artifact, and publishes the ZIP as a GitHub Release when a version tag such as `v0.7.3` is pushed. Tags must match `src/manifest.json`'s version.
+Install `dist/project-kanban.zip` using the instructions above. The ZIP contains `manifest.json`, `plugin.js`, and a self-contained `index.html` at its root. The builder compacts CSS formatting and refuses HTML larger than the released 19.1 loader's 100 KiB cap. It does not rewrite/minify JavaScript or add runtime dependencies. The [CI workflow](.github/workflows/release.yml) runs the Deno checks/build on pushes and pull requests, uploads a short-lived build artifact, and publishes the ZIP as a GitHub Release when a version tag such as `v0.7.3` is pushed. Tags must match `src/manifest.json`'s version.
 
 ## Verify on a disposable project
 
@@ -103,6 +112,11 @@ PLAYWRIGHT_BROWSERS_PATH="$TMPDIR/kanban-browser/browsers" \
 PLAYWRIGHT_MODULE="$TMPDIR/kanban-browser/node_modules/playwright/index.mjs" \
   PLAYWRIGHT_BROWSERS_PATH="$TMPDIR/kanban-browser/browsers" \
   node tests/browser/touch-drag.mjs
+
+# Desktop data-entry/completion/focus and coarse-pointer geometry regressions:
+PLAYWRIGHT_MODULE="$TMPDIR/kanban-browser/node_modules/playwright/index.mjs" \
+  PLAYWRIGHT_BROWSERS_PATH="$TMPDIR/kanban-browser/browsers" \
+  node tests/browser/coherence.mjs
 ```
 
 Manual app checks:
@@ -128,7 +142,7 @@ Manual app checks:
 ## Limits
 
 - The embedded iframe uses its own styled cards, not the app's internal Angular Boards component.
-- The card's right-click menu is a plugin-local visual recreation, not the native task-row menu. Actions labelled **List** select the task and switch views; they do not start a focus session, change priority, duplicate, or move to native backlog on their own.
+- The card's right-click menu is a plugin-local visual recreation, not the native task-row menu. Navigation-labelled actions with **List ↗** select the task and switch views; they do not change priority, duplicate, or move to native backlog on their own. Focus setup is a separate supported-API action when available, with task-tracking and failure feedback as described above; starting its session timer still belongs to native setup.
 - It does not expose sections, duplicate Boards, or reorder the app's native task list. When no plugin-specific order exists, cards follow the order returned by the plugin task API.
 - Both boards hide completed tasks, even when they retain tags from outside the plugin. Moving a card with multiple configured lane tags resolves the conflict by removing the *configured* lane tags; unrelated tags remain.
 - Cards can be moved and reordered with Shift+H/J/K/L or by dragging. Subtasks are only accessible through their parent/native details, and these board-local keys do not change the app's native task-list order.

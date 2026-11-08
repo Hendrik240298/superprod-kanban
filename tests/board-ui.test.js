@@ -13,14 +13,18 @@ async function touchBoard() {
   const values = new Map();
   const selected = [];
   const hooks = new Map();
+  const errors = [];
   const context = { id: "p", type: "PROJECT" };
+  const parent = {};
   const document = {
     createElement: (tag) => new Node(tag),
     createElementNS: (_ns, tag) => new Node(tag),
-    addEventListener: (key, fn) => listeners.set(key, fn),
+    addEventListener: (key, fn) =>
+      listeners.set(key, [...(listeners.get(key) || []), fn]),
     querySelectorAll: (selector) => app.querySelectorAll(selector),
     querySelector: (selector) => app.querySelector(selector),
-    getElementById: (id) => id === "app" ? app : null,
+    getElementById: (id) =>
+      id === "app" ? app : descendants(app, (n) => n.id === id)[0],
     get activeElement() {
       return Node.activeElement;
     },
@@ -29,7 +33,7 @@ async function touchBoard() {
   const api = {
     Hooks: { ANY_TASK_UPDATE: "task", WORK_CONTEXT_CHANGE: "context" },
     registerHook: (key, fn) => hooks.set(key, fn),
-    getActiveWorkContext: async () => context,
+    getActiveWorkContext: async () => ({ ...context }),
     getAllProjects: async () => [{ id: "p", title: "Test" }],
     getAllTags: async () => [
       { id: "backlog", title: "Backlog" },
@@ -51,10 +55,12 @@ async function touchBoard() {
     "BoardCore",
     "setTimeout",
     "clearTimeout",
+    "console",
     source,
   )(
     {
       PluginAPI: api,
+      parent,
       addEventListener: (key, fn) => listeners.set(`window:${key}`, fn),
     },
     document,
@@ -64,6 +70,7 @@ async function touchBoard() {
       return timerId;
     },
     (id) => timers.delete(id),
+    { error: (...args) => errors.push(args.join(" ")) },
   );
   await flush();
   return {
@@ -73,9 +80,16 @@ async function touchBoard() {
     values,
     selected,
     hooks,
+    parent,
     context,
+    api,
+    errors,
     card: () => app.querySelector(".card"),
-    fire: (key, event) => listeners.get(key)?.(event),
+    fire: (key, event) => {
+      const callbacks = listeners.get(key);
+      if (Array.isArray(callbacks)) callbacks.forEach((fn) => fn(event));
+      else callbacks?.(event);
+    },
     hold: () => {
       const callbacks = [...timers.values()];
       timers.clear();
@@ -88,6 +102,707 @@ async function touchBoard() {
     }),
   };
 }
+
+for (const shortcut of ["companion", "Shift+V", "Ctrl+Alt+K"]) {
+  for (
+    const scenario of [
+      "normal",
+      "switched",
+      "returned",
+      "hook-only",
+      "superseded",
+      "lookup-race",
+    ]
+  ) {
+    Deno.test(`List ${shortcut} delayed save: ${scenario}`, async () => {
+      const board = await touchBoard();
+      board.card().focus();
+      const closed = [];
+      const pending = [];
+      board.api.closeWorkContextView = async () =>
+        closed.push(board.context.id);
+      board.api.persistDataSynced = async (value, key) => {
+        if (key.startsWith("view-")) {
+          await new Promise((resolve) => pending.push(resolve));
+        }
+        board.values.set(key, value);
+      };
+      const toggle = () =>
+        shortcut === "companion"
+          ? board.fire("window:message", {
+            source: board.parent,
+            data: { type: "superprod-keyboard-command", command: "list" },
+          })
+          : board.fire("keydown", {
+            key: shortcut === "Shift+V" ? "V" : "k",
+            shiftKey: shortcut === "Shift+V",
+            ctrlKey: shortcut === "Ctrl+Alt+K",
+            altKey: shortcut === "Ctrl+Alt+K",
+            target: Node.activeElement,
+            preventDefault() {},
+          });
+      toggle();
+      await flush();
+      if (pending.length !== 1) throw new Error("List write was not requested");
+      if (scenario === "switched") board.context.id = "q";
+      if (scenario === "returned" || scenario === "hook-only") {
+        for (const id of ["q", "p"]) {
+          board.context.id = id;
+          board.hooks.get("context")();
+          if (scenario === "returned") board.hold();
+          await flush();
+        }
+      }
+      if (scenario === "superseded") {
+        toggle();
+        await flush();
+      }
+      let releaseLookup;
+      if (scenario === "lookup-race") {
+        board.api.getActiveWorkContext = () =>
+          new Promise((resolve) =>
+            releaseLookup = () => resolve({ ...board.context })
+          );
+      }
+      pending.shift()();
+      await flush();
+      if (scenario === "lookup-race") {
+        if (typeof releaseLookup !== "function") {
+          throw new Error("List close did not revalidate the host context");
+        }
+        toggle();
+        await flush();
+        releaseLookup();
+        await flush();
+      }
+      if (board.values.get("view-p") !== "list" || board.values.has("view-q")) {
+        throw new Error("List preference was saved to the wrong project");
+      }
+      if (closed.length !== (scenario === "normal" ? 1 : 0)) {
+        throw new Error(
+          `Stale ${shortcut} closed ${closed.join(",")} in ${scenario}`,
+        );
+      }
+      if (pending.length) {
+        board.api.getActiveWorkContext = async () => ({ ...board.context });
+        pending.shift()();
+        await flush();
+        if (closed.length !== 1) {
+          throw new Error("Latest List request did not close");
+        }
+      }
+    });
+  }
+}
+
+Deno.test("holding completion after refresh never completes the next card", async () => {
+  const board = await touchBoard();
+  board.card().focus();
+  const key = (repeat) =>
+    board.fire("keydown", {
+      key: "d",
+      repeat,
+      target: Node.activeElement,
+      preventDefault() {},
+    });
+  key(false);
+  await flush();
+  key(true);
+  await flush();
+  if (!board.tasks[0].isDone || board.tasks[1].isDone) {
+    throw new Error("Repeated completion cascaded onto the next task");
+  }
+  key(false);
+  await flush();
+  if (!board.tasks[1].isDone) throw new Error("Fresh completion was blocked");
+});
+
+Deno.test("busy title save retains the visible draft and explains rejection", async () => {
+  const board = await touchBoard();
+  const update = board.api.updateTask;
+  let release;
+  board.api.updateTask = async (...args) => {
+    await new Promise((resolve) => release = resolve);
+    return update(...args);
+  };
+  board.card().querySelector(".card-complete").click();
+  await flush();
+  const card = board.app.querySelectorAll(".card")[1];
+  card.startEditing();
+  const input = card.querySelector(".card-title-input");
+  input.value = "Retain this draft";
+  input.fire("keydown", {
+    key: "Enter",
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  if (
+    input.hidden || input.value !== "Retain this draft" ||
+    !board.document.getElementById("board-status").textContent.includes("busy")
+  ) {
+    throw new Error("Busy title submission silently discarded the draft");
+  }
+  release();
+  await flush();
+  if (
+    board.tasks[1].title !== "Second" ||
+    board.app.querySelector(".card-title-input").value !== "Retain this draft"
+  ) {
+    throw new Error("Pending refresh lost or unexpectedly saved the draft");
+  }
+});
+
+Deno.test("menu saves retain drafts while busy or rejected and allow retry", async () => {
+  const board = await touchBoard();
+  let release;
+  const update = board.api.updateTask;
+  board.api.updateTask = async (...args) => {
+    await new Promise((resolve) => release = resolve);
+    return update(...args);
+  };
+  board.card().querySelector(".card-complete").click();
+  await flush();
+  const card = board.app.querySelectorAll(".card")[1];
+  card.querySelector(".card-actions").click();
+  descendants(
+    board.app,
+    (n) => n.className === "card-menu-label" && n.textContent === "Add subtask",
+  )[0].closest("button").click();
+  let form = board.app.querySelector(".card-menu-form");
+  let input = form.querySelector("input");
+  input.value = "Subtask draft";
+  const submit = () => form.fire("submit", { preventDefault() {} });
+  submit();
+  await flush();
+  if (
+    !form.isConnected || input.value !== "Subtask draft" ||
+    !board.app.querySelector(".card-menu-form-error").textContent.includes(
+      "busy",
+    )
+  ) {
+    throw new Error("Busy menu submission silently closed the draft");
+  }
+  release();
+  await flush();
+  // Reopen if this refresh closed the form (refresh preservation is a separate test).
+  if (!form.isConnected) {
+    board.card().querySelector(".card-actions").click();
+    descendants(
+      board.app,
+      (n) =>
+        n.className === "card-menu-label" && n.textContent === "Add subtask",
+    )[0].closest("button").click();
+    form = board.app.querySelector(".card-menu-form");
+    input = form.querySelector("input");
+    input.value = "Subtask draft";
+  }
+  board.api.addTask = async () => {
+    throw new Error("Offline");
+  };
+  submit();
+  await flush();
+  if (!form.isConnected || input.value !== "Subtask draft") {
+    throw new Error("Failed save lost menu draft");
+  }
+  const added = [];
+  board.api.addTask = async (fields) => {
+    added.push(fields);
+    return "new-child";
+  };
+  submit();
+  await flush();
+  if (
+    board.app.querySelector(".card-menu-form") || added.length !== 1 ||
+    added[0].parentId !== "b"
+  ) {
+    throw new Error("Retry did not save the retained menu draft exactly once");
+  }
+});
+
+Deno.test("same-project refresh keeps menu draft and focus but stale targets cannot save", async () => {
+  for (const change of ["refresh", "deleted", "moved", "project"]) {
+    const board = await touchBoard();
+    board.card().querySelector(".card-actions").click();
+    descendants(
+      board.app,
+      (n) =>
+        n.className === "card-menu-label" && n.textContent === "Add subtask",
+    )[0].closest("button").click();
+    const input = board.app.querySelector(".card-menu-form input");
+    input.value = "Keep menu draft";
+    input.focus();
+    if (change === "deleted") board.tasks.shift();
+    if (change === "moved") board.tasks[0].projectId = "q";
+    if (change === "project") board.context.id = "q";
+    board.hooks.get("task")();
+    board.hold();
+    await flush();
+    const restored = board.app.querySelector(".card-menu-form input");
+    if (change === "refresh") {
+      if (
+        restored?.value !== "Keep menu draft" || Node.activeElement !== restored
+      ) {
+        throw new Error("Same-project refresh discarded menu draft or focus");
+      }
+    } else if (restored) throw new Error("Stale menu target survived refresh");
+  }
+});
+
+Deno.test("valid inline blur commits once; Enter followed by blur never resubmits", async () => {
+  for (const enter of [false, true]) {
+    const board = await touchBoard();
+    const update = board.api.updateTask;
+    const writes = [];
+    board.api.updateTask = async (...args) => {
+      writes.push(args);
+      return update(...args);
+    };
+    const card = board.card();
+    card.startEditing();
+    const input = card.querySelector(".card-title-input");
+    input.value = "Saved on blur";
+    if (enter) {
+      input.fire("keydown", {
+        key: "Enter",
+        preventDefault() {},
+        stopPropagation() {},
+      });
+    }
+    input.fire("blur");
+    await flush();
+    if (board.tasks[0].title !== "Saved on blur" || writes.length !== 1) {
+      throw new Error("Blur lost the title or double-submitted Enter");
+    }
+  }
+});
+
+Deno.test("invalid and failed blur drafts survive unfocused refresh; Escape cancels", async () => {
+  for (const failure of ["invalid", "failed", "escape"]) {
+    const board = await touchBoard();
+    const update = board.api.updateTask;
+    let writes = 0;
+    board.api.updateTask = async (...args) => {
+      writes++;
+      if (failure === "failed") throw new Error("Offline title save");
+      return update(...args);
+    };
+    const card = board.card();
+    card.startEditing();
+    const input = card.querySelector(".card-title-input");
+    const draft = failure === "invalid"
+      ? "Title @every Friday"
+      : "Unsaved title";
+    input.value = draft;
+    if (failure === "escape") {
+      input.fire("keydown", {
+        key: "Escape",
+        preventDefault() {},
+        stopPropagation() {},
+      });
+    }
+    input.fire("blur");
+    board.app.querySelector(".task-add-input").focus();
+    await flush();
+    board.hooks.get("task")();
+    board.hold();
+    await flush();
+    const restored = board.card().querySelector(".card-title-input");
+    if (failure === "escape") {
+      if (!restored.hidden || writes) {
+        throw new Error("Escape saved a cancelled title");
+      }
+    } else if (
+      restored.hidden || restored.value !== draft ||
+      board.tasks[0].title !== "First"
+    ) {
+      throw new Error("Unfocused refresh lost a rejected title draft");
+    }
+  }
+});
+
+for (const action of ["circle", "d"]) {
+  for (const kind of ["ordinary", "recurring", "parent"]) {
+    Deno.test(`${action} completion of ${kind} task is silent and preserves data/focus`, async () => {
+      const board = await touchBoard();
+      const task = board.tasks[0];
+      task.dueDay = "2026-11-09";
+      if (kind === "recurring") task.repeatCfgId = "repeat";
+      if (kind === "parent") task.subTaskIds = ["child"];
+      const expected = JSON.stringify({ ...task, isDone: true });
+      board.card().focus();
+      if (action === "circle") {
+        board.card().querySelector(".card-complete").click();
+      } else {board.fire("keydown", {
+          key: "d",
+          target: Node.activeElement,
+          preventDefault() {},
+        });}
+      await flush();
+      if (
+        JSON.stringify(task) !== expected ||
+        board.card()?.dataset.taskId !== "b" ||
+        Node.activeElement?.dataset.taskId !== "b"
+      ) {
+        throw new Error(
+          "Completion lost task data or did not focus the remaining card",
+        );
+      }
+      for (const refresh of [false, true]) {
+        if (refresh) {
+          board.hooks.get("task")();
+          board.hold();
+          await flush();
+        }
+        if (
+          board.app.querySelector(".completion-feedback") ||
+          board.app.querySelector(".completion-undo") ||
+          board.document.getElementById("board-status").textContent ||
+          descendants(board.app, (node) => node.textContent === "Undo").length
+        ) {
+          throw new Error(
+            "Completion left persistent feedback or board-local Undo UI",
+          );
+        }
+      }
+    });
+  }
+}
+
+Deno.test("pending title and menu saves revalidate latest task and active project", async () => {
+  for (const action of ["title", "subtask", "complete"]) {
+    for (const change of ["context", "deleted", "moved", "done", "child"]) {
+      const board = await touchBoard();
+      const card = board.card();
+      if (action === "title") card.startEditing();
+      if (action === "subtask") {
+        card.querySelector(".card-actions").click();
+        descendants(
+          board.app,
+          (n) =>
+            n.className === "card-menu-label" &&
+            n.textContent === "Add subtask",
+        )[0].closest("button").click();
+      }
+      if (change === "context") board.context.id = "q";
+      if (change === "deleted") board.tasks.shift();
+      if (change === "moved") board.tasks[0].projectId = "q";
+      if (change === "done") board.tasks[0].isDone = true;
+      if (change === "child") board.tasks[0].parentId = "parent";
+      let writes = 0;
+      board.api.updateTask = board.api.addTask = async () => {
+        writes++;
+        return "new";
+      };
+      if (action === "title") {
+        const input = card.querySelector(".card-title-input");
+        input.value = "Stale title";
+        input.fire("blur");
+      } else if (action === "subtask") {
+        const form = board.app.querySelector(".card-menu-form");
+        form.querySelector("input").value = "Stale subtask";
+        form.fire("submit", { preventDefault() {} });
+      } else card.querySelector(".card-complete").click();
+      await flush();
+      if (writes) throw new Error(`${action} saved against ${change} target`);
+    }
+  }
+});
+
+Deno.test("board opens native focus setup through awaited allowed APIs, not session start", async () => {
+  const board = await touchBoard();
+  const calls = [];
+  board.api.startTracking = async (id) => {
+    await Promise.resolve();
+    calls.push(["track", id]);
+  };
+  board.api.dispatchAction = async (action) => {
+    await Promise.resolve();
+    calls.push(["dispatch", action.type]);
+  };
+  board.card().querySelector(".card-actions").click();
+  const focus = descendants(
+    board.app,
+    (n) =>
+      n.className === "card-menu-label" &&
+      n.textContent === "Open focus setup",
+  )[0];
+  if (!focus) throw new Error("Missing verified native focus setup action");
+  focus.closest("button").click();
+  await flush();
+  if (
+    JSON.stringify(calls) !==
+      JSON.stringify([["track", "a"], [
+        "dispatch",
+        "[FocusMode] Show Overlay",
+      ]]) ||
+    !board.document.getElementById("board-status").textContent.includes("timer")
+  ) {
+    throw new Error(
+      "Focus setup did not await tracking/allowed overlay or misreported timer start",
+    );
+  }
+  const manifest = JSON.parse(
+    await Deno.readTextFile(new URL("../src/manifest.json", import.meta.url)),
+  );
+  for (const permission of ["startTracking", "dispatchAction"]) {
+    if (!manifest.permissions.includes(permission)) {
+      throw new Error(`Missing ${permission} permission`);
+    }
+  }
+});
+
+Deno.test("focus setup awaits rejected bridge actions and reports partial tracking with List fallback", async () => {
+  for (const mode of ["legacy", "rejected", "tracking-rejected"]) {
+    const board = await touchBoard();
+    const calls = [];
+    board.api.startTracking = async () => {
+      await Promise.resolve();
+      if (mode === "tracking-rejected") throw new Error("Tracking unavailable");
+    };
+    board.api.dispatchAction = async (action) => {
+      await Promise.resolve();
+      calls.push(action.type);
+      if (action.type === "[FocusMode] Show Overlay" || mode === "rejected") {
+        throw new Error("Action not allowed");
+      }
+    };
+    board.api.closeWorkContextView = async () => {};
+    board.card().querySelector(".card-actions").click();
+    descendants(
+      board.app,
+      (n) =>
+        n.className === "card-menu-label" &&
+        n.textContent === "Open focus setup",
+    )[0].closest("button").click();
+    await flush();
+    const message = board.document.getElementById("board-status").textContent;
+    if (mode === "legacy") {
+      if (
+        JSON.stringify(calls) !==
+          JSON.stringify([
+            "[FocusMode] Show Overlay",
+            "[FocusMode] Show Focus Overlay",
+          ]) || !message.includes("opened")
+      ) {
+        throw new Error(
+          "Async bridge rejection did not trigger legacy setup fallback",
+        );
+      }
+    } else {
+      if (
+        !message.includes(
+          mode === "rejected" ? "tracking started" : "not started",
+        ) ||
+        (mode === "tracking-rejected" && calls.length)
+      ) throw new Error("Focus failure hid its tracking stage");
+      const fallback = board.app.querySelector(".focus-list-fallback");
+      if (!fallback) {
+        throw new Error("Rejected setup left no explicit native List fallback");
+      }
+      fallback.click();
+      await flush();
+      if (board.values.get("view-p") !== "list" || board.selected[0] !== "a") {
+        throw new Error("List fallback did not navigate");
+      }
+    }
+  }
+});
+
+Deno.test("unsupported menu actions describe navigation, with a consistent List indicator", async () => {
+  const board = await touchBoard();
+  board.card().querySelector(".card-actions").click();
+  for (
+    const label of [
+      "Open in List for focus…",
+      "Open in List to duplicate…",
+      "Set priority in List…",
+    ]
+  ) {
+    const item = descendants(
+      board.app,
+      (n) => n.className === "card-menu-label" && n.textContent === label,
+    )[0]?.closest("button");
+    if (
+      !item || item.querySelector(".card-menu-hint")?.textContent !== "List ↗"
+    ) {
+      throw new Error(`Unsupported action still promises execution: ${label}`);
+    }
+  }
+});
+
+Deno.test("quick-add has no persistent instruction banner or dangling help reference", async () => {
+  const board = await touchBoard();
+  if (board.app.querySelector(".quick-add-help")) {
+    throw new Error("Unwanted persistent quick-add instructions remain");
+  }
+  if (
+    board.app.querySelector(".task-add-input").getAttribute(
+      "aria-describedby",
+    )
+  ) {
+    throw new Error("Removed help left a dangling accessibility reference");
+  }
+});
+
+Deno.test("action menu supports hjkl without taking text or modified shortcuts", async () => {
+  const board = await touchBoard();
+  board.card().querySelector(".card-actions").click();
+  const menu = board.app.querySelector(".card-menu");
+  const buttons = menu.querySelectorAll("button");
+  buttons[0].focus();
+  const key = (value, options = {}) =>
+    menu.fire("keydown", {
+      key: value,
+      target: Node.activeElement,
+      preventDefault() {},
+      stopPropagation() {},
+      ...options,
+    });
+  key("j");
+  if (Node.activeElement !== buttons[1]) throw new Error("j did not move down");
+  key("k");
+  if (Node.activeElement !== buttons[0]) throw new Error("k did not move up");
+  key("j", { ctrlKey: true });
+  if (Node.activeElement !== buttons[0]) throw new Error("Stole modified j");
+  const estimate = descendants(
+    menu,
+    (n) => n.className === "card-menu-label" && n.textContent === "Estimate",
+  )[0].closest("button");
+  estimate.focus();
+  key("l");
+  if (!menu.querySelector(".card-menu-back")) {
+    throw new Error("l did not open submenu");
+  }
+  key("h");
+  if (menu.querySelector(".card-menu-back")) {
+    throw new Error("h did not return");
+  }
+  descendants(
+    menu,
+    (n) => n.className === "card-menu-label" && n.textContent === "Add subtask",
+  )[0].closest("button").click();
+  const input = menu.querySelector("input");
+  input.focus();
+  for (const value of ["h", "j", "k", "l"]) {
+    key(value, {
+      preventDefault() {
+        throw new Error("Stole typed " + value);
+      },
+    });
+  }
+  if (Node.activeElement !== input) throw new Error("Typing moved menu focus");
+});
+
+Deno.test("title draft never follows a moved task into another project", async () => {
+  const board = await touchBoard();
+  board.card().startEditing();
+  board.card().querySelector(".card-title-input").value =
+    "Private old-project draft";
+  board.tasks[0].projectId = "q";
+  board.context.id = "q";
+  board.hooks.get("task")();
+  board.hold();
+  await flush();
+  if (!board.card().querySelector(".card-title-input").hidden) {
+    throw new Error(
+      "Old-project title draft was restored against a moved task",
+    );
+  }
+});
+
+Deno.test("accepted title save stays single across a local rerender", async () => {
+  const board = await touchBoard();
+  let release;
+  const update = board.api.updateTask;
+  let writes = 0;
+  board.api.updateTask = async (...args) => {
+    writes++;
+    await new Promise((resolve) => release = resolve);
+    return update(...args);
+  };
+  board.card().startEditing();
+  const input = board.card().querySelector(".card-title-input");
+  input.value = "Accepted title";
+  input.fire("keydown", {
+    key: "Enter",
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  await flush();
+  descendants(
+    board.app,
+    (n) => n.tag === "button" && n.textContent === "Configure lanes",
+  )[0].click();
+  board.card().querySelector(".card-title-input").fire("blur");
+  release();
+  await flush();
+  if (
+    !board.card().querySelector(".card-title-input").hidden || writes !== 1 ||
+    board.tasks[0].title !== "Accepted title"
+  ) {
+    throw new Error(
+      "A rerender resurrected or duplicated an accepted title save",
+    );
+  }
+});
+
+Deno.test("created subtask is accepted even if opening native details fails", async () => {
+  const board = await touchBoard();
+  const added = [];
+  board.api.addTask = async (fields) => {
+    added.push(fields);
+    return "child";
+  };
+  board.api.selectTask = async () => {
+    throw new Error("Panel unavailable");
+  };
+  board.card().querySelector(".card-actions").click();
+  descendants(
+    board.app,
+    (n) => n.className === "card-menu-label" && n.textContent === "Add subtask",
+  )[0].closest("button").click();
+  const form = board.app.querySelector(".card-menu-form");
+  form.querySelector("input").value = "Created once";
+  form.fire("submit", { preventDefault() {} });
+  await flush();
+  if (
+    added.length !== 1 || board.app.querySelector(".card-menu-form") ||
+    !board.document.getElementById("board-status").textContent.includes(
+      "Subtask created",
+    )
+  ) {
+    throw new Error(
+      "Partial selection failure encouraged a duplicate subtask submission",
+    );
+  }
+});
+
+Deno.test("accepted menu mutation is not offered for retry when only refresh fails", async () => {
+  const board = await touchBoard();
+  let added = 0;
+  board.api.addTask = async () => {
+    added++;
+    board.api.getAllTags = async () => {
+      throw new Error("Refresh offline");
+    };
+    return "child";
+  };
+  board.card().querySelector(".card-actions").click();
+  descendants(
+    board.app,
+    (n) => n.className === "card-menu-label" && n.textContent === "Add subtask",
+  )[0].closest("button").click();
+  const form = board.app.querySelector(".card-menu-form");
+  form.querySelector("input").value = "Accepted mutation";
+  form.fire("submit", { preventDefault() {} });
+  await flush();
+  if (
+    added !== 1 || board.app.querySelector(".card-menu-form") ||
+    !board.document.getElementById("board-status").textContent.includes("Saved")
+  ) {
+    throw new Error("A refresh failure was misreported as a rejected mutation");
+  }
+});
 
 Deno.test("iframe refocus restores the card after a background refresh", async () => {
   const board = await touchBoard();
@@ -564,7 +1279,7 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
     log: { err: () => {} },
   };
   new Function("window", "document", "BoardCore", "console", source)(
-    { PluginAPI: api },
+    { PluginAPI: api, addEventListener() {} },
     document,
     BoardCore,
     { error: (...args) => errors.push(args.join(" ")) },
@@ -1241,11 +1956,11 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
           child.className === "card-menu-label" &&
           child.textContent === label).length))[0];
   if (
-    !menu() || !menuItem("Start focus session") ||
+    !menu() || !menuItem("Open in List for focus…") ||
     !menuItem("Schedule today") || !menuItem("Schedule tomorrow") ||
     !menuItem("Move to top") || !menuItem("Move to bottom") ||
-    !menuItem("Add subtask") || !menuItem("Duplicate") ||
-    !menuItem("Estimate") || !menuItem("Priority") ||
+    !menuItem("Add subtask") || !menuItem("Open in List to duplicate…") ||
+    !menuItem("Estimate") || !menuItem("Set priority in List…") ||
     !menuItem("Toggle tags") || !menuItem("Move to project") ||
     !menuItem("Delete task") ||
     document.activeElement !== menuItem("Schedule today")
@@ -1581,7 +2296,7 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   values.delete("view-p");
   closed.length = 0;
   openTaskMenu("new-3");
-  menuItem("Start focus session").fire("click", { stopPropagation() {} });
+  menuItem("Open in List for focus…").fire("click", { stopPropagation() {} });
   await flush();
   if (
     values.get("view-p") !== "list" || closed.length !== 1 ||
@@ -1589,6 +2304,41 @@ Deno.test("iframe switches templates and saves drag ordering inside Clarify", as
   ) {
     throw new Error(
       "Host-only menu action did not take the task to native List",
+    );
+  }
+});
+
+Deno.test("board consumes exported typography, shape and focus tokens with separate coarse completion target", async () => {
+  const css = await Deno.readTextFile(
+    new URL("../src/style.css", import.meta.url),
+  );
+  for (
+    const token of [
+      "--font-size-md",
+      "--card-border-radius",
+      "--radius-md",
+      "--focus-ring-width",
+      "--focus-ring-offset",
+      "--focus-ring-color",
+      "--card-shadow",
+    ]
+  ) {
+    if (!css.includes(`var(${token},`)) {
+      throw new Error(`Board ignores exported token ${token}`);
+    }
+  }
+  const coarse = css.slice(
+    css.indexOf("@media (pointer: coarse)"),
+    css.indexOf(".card-menu {"),
+  );
+  if (
+    !/\.card-complete\s*\{[^}]*width: 44px;[^}]*height: 44px;/s.test(coarse) ||
+    !/\.card-complete::before\s*\{[^}]*width: 16px;[^}]*height: 16px;/s.test(
+      css,
+    )
+  ) {
+    throw new Error(
+      "Completion needs a large touch target, not a huge visible circle",
     );
   }
 });
@@ -1721,7 +2471,7 @@ Deno.test("existing project boards migrate lanes without rewriting tasks", async
     persistDataSynced: async (value, key) => values.set(key, value),
   };
   new Function("window", "document", "BoardCore", "console", source)(
-    { PluginAPI: api },
+    { PluginAPI: api, addEventListener() {} },
     document,
     BoardCore,
     { error() {} },

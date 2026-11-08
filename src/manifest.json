@@ -1,7 +1,7 @@
 {
   "id": "project-kanban",
   "name": "Project Kanban",
-  "version": "0.7.5",
+  "version": "0.8.1",
   "description": "A tag-based Kanban view inside each Super Productivity project.",
   "manifestVersion": 1,
   "minSupVersion": "18.7.0",
@@ -23,6 +23,8 @@
     "updateTask",
     "deleteTask",
     "selectTask",
+    "startTracking",
+    "dispatchAction",
     "loadSyncedData",
     "persistDataSynced"
   ]

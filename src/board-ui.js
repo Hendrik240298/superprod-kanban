@@ -18,11 +18,14 @@
     focusBoard: true,
     focusAdd: null,
     help: false,
+    titleSaves: new Map(),
   };
   let loadToken = 0;
+  let listToken = 0;
   let refreshTimer;
   let lastG = 0;
   let activeMenu = null;
+  let rendering = false;
   let workflowMigration;
   let touchContextUntil = 0;
   let touchDrag = null;
@@ -101,13 +104,28 @@
   }
 
   async function run(action) {
-    if (state.busy) return;
+    if (state.busy) {
+      status("Board is busy. Your draft is kept; try saving again.", true);
+      return false;
+    }
     state.busy = true;
+    let accepted = false;
     try {
       await action();
+      accepted = true;
       await loadProject();
+      return true;
     } catch (error) {
-      status(error instanceof Error ? error.message : "Operation failed", true);
+      const message = error instanceof Error
+        ? error.message
+        : "Operation failed";
+      status(
+        accepted
+          ? `Saved, but board refresh failed. Do not resubmit; reopen the board. ${message}`
+          : message,
+        true,
+      );
+      return accepted;
     } finally {
       state.busy = false;
     }
@@ -297,15 +315,44 @@
 
   function render() {
     if (!state.ctx) return;
+    rendering = true;
+    const openEdits = Array.from(document.querySelectorAll(".card-title-input"))
+      .filter((input) =>
+        !input.hidden && input.dataset.projectId === state.ctx.id &&
+        state.titleSaves.get(
+            `${input.dataset.projectId}:${input.dataset.taskId}`,
+          ) !== true
+      )
+      .map((input) => ({
+        taskId: input.dataset.taskId,
+        value: input.value,
+        caret: input.selectionStart,
+      }));
     cancelTouchDrag();
-    closeMenu();
+    const restoreMenu = activeMenu?.node.querySelector(".card-menu-form") &&
+        activeMenu.projectId === state.ctx.id &&
+        activeMenu.template === state.template &&
+        state.tasks.some((task) =>
+          task.id === activeMenu.card.dataset.taskId &&
+          task.projectId === state.ctx.id && !task.parentId && !task.isDone
+        )
+      ? { ...activeMenu, focused: document.activeElement }
+      : null;
+    if (restoreMenu) {
+      activeMenu = null;
+      restoreMenu.node.remove();
+    } else closeMenu(false);
     const restoreCard = document.activeElement?.classList.contains("card")
       ? state.focusedCard
       : null;
     const restoreBoard = state.focusBoard ||
       document.activeElement?.classList.contains("board");
     const restoreEdit =
-      document.activeElement?.classList.contains("card-title-input")
+      document.activeElement?.classList.contains("card-title-input") &&
+        document.activeElement.dataset.projectId === state.ctx.id &&
+        state.titleSaves.get(
+            `${state.ctx.id}:${document.activeElement.dataset.taskId}`,
+          ) !== true
         ? {
           taskId: document.activeElement.dataset.taskId,
           value: document.activeElement.value,
@@ -328,6 +375,7 @@
     shell.append(el("p", "status", ""));
     shell.lastChild.id = "board-status";
     if (state.settings) shell.append(renderSettings());
+
     if (state.help && !state.settings) {
       shell.append(
         el(
@@ -368,6 +416,25 @@
     }
     shell.append(board);
     app.replaceChildren(shell);
+    for (const draft of openEdits) {
+      const card = Array.from(document.querySelectorAll(".card")).find((node) =>
+        node.dataset.taskId === draft.taskId
+      );
+      if (!card) continue;
+      card.startEditing(false);
+      const input = card.querySelector(".card-title-input");
+      input.value = draft.value;
+      input.setSelectionRange(draft.caret, draft.caret);
+    }
+    rendering = false;
+    if (restoreMenu) {
+      const card = Array.from(document.querySelectorAll(".card")).find((node) =>
+        node.dataset.taskId === restoreMenu.card.dataset.taskId
+      );
+      activeMenu = { ...restoreMenu, card };
+      shell.append(restoreMenu.node);
+      restoreMenu.focused?.focus();
+    }
     state.focusBoard = false;
     if (
       state.focusAdd && (state.focusAdd.projectId !== state.ctx.id ||
@@ -382,6 +449,8 @@
       );
       state.focusAdd = null;
       lane?.querySelector(".add-row input")?.focus();
+    } else if (restoreMenu) {
+      // The existing form owns its value, caret, validation and focus.
     } else if (restoreEdit) {
       const card = Array.from(document.querySelectorAll(".card")).find((node) =>
         node.dataset.taskId === restoreEdit.taskId
@@ -636,6 +705,7 @@
     input.value = state.drafts.get(key) || "";
     input.placeholder = `Add to ${lane.label}`;
     input.setAttribute("aria-label", `New task in ${lane.label}`);
+
     const add = el("button", "", "Add");
     add.type = "submit";
     main.append(input, add);
@@ -721,13 +791,22 @@
     if (restoreFocus && card.isConnected) card.focus();
   }
 
+  async function latestCardTask(taskId, projectId) {
+    const latest = (await api.getTasks()).find((entry) =>
+      entry.id === taskId && entry.projectId === projectId && !entry.parentId &&
+      !entry.isDone
+    );
+    const ctx = await api.getActiveWorkContext();
+    if (!latest || ctx?.type !== "PROJECT" || ctx.id !== projectId) {
+      throw new Error("Task changed or left this project.");
+    }
+    return latest;
+  }
+
   function finishTask(taskId) {
     const projectId = state.ctx?.id;
     void run(async () => {
-      const latest = (await api.getTasks()).find((entry) =>
-        entry.id === taskId && entry.projectId === projectId && !entry.parentId
-      );
-      if (!latest) throw new Error("Task changed or left this project.");
+      const latest = await latestCardTask(taskId, projectId);
       await api.updateTask(latest.id, { isDone: true });
     });
   }
@@ -771,38 +850,90 @@
 
   function updateCardTask(taskId, changes) {
     const projectId = state.ctx?.id;
-    void run(async () => {
-      const latest = (await api.getTasks()).find((entry) =>
-        entry.id === taskId && entry.projectId === projectId && !entry.parentId
-      );
-      if (!latest) throw new Error("Task changed or left this project.");
+    return run(async () => {
+      const latest = await latestCardTask(taskId, projectId);
       await api.updateTask(taskId, changes(latest));
     });
   }
 
-  function openTaskInList(taskId) {
+  async function openFocusSetup(taskId) {
     const projectId = state.ctx?.id;
-    if (!projectId) return;
-    void api.selectTask(taskId)
-      .then(() => api.persistDataSynced("list", `view-${projectId}`))
-      .then(() => api.closeWorkContextView())
-      .catch((error) => status(String(error), true));
+
+    const opened = await run(async () => {
+      await latestCardTask(taskId, projectId);
+      try {
+        await api.startTracking(taskId);
+      } catch (error) {
+        throw new Error(
+          `Task tracking not started; focus setup not opened. ${error.message}`,
+        );
+      }
+      try {
+        await api.dispatchAction({ type: "[FocusMode] Show Overlay" });
+      } catch {
+        try {
+          await api.dispatchAction({ type: "[FocusMode] Show Focus Overlay" });
+        } catch {
+          throw new Error(
+            "Task tracking started, but focus setup could not open. Use native List for focus; tracking was not rolled back.",
+          );
+        }
+      }
+    });
+    if (opened) {
+      status(
+        "Focus setup opened. Task tracking started; start the focus timer in native setup.",
+      );
+    } else if (state.ctx?.id === projectId) {
+      document.getElementById("board-status")?.append(control(
+        "Open in List for focus…",
+        () => openTaskInList(taskId),
+        "focus-list-fallback",
+      ));
+    }
   }
 
-  function addSubtask(taskId, title) {
+  async function openTaskInList(taskId) {
     const projectId = state.ctx?.id;
-    void run(async () => {
-      const latest = (await api.getTasks()).find((entry) =>
-        entry.id === taskId && entry.projectId === projectId && !entry.parentId
-      );
-      if (!latest) throw new Error("Task changed or left this project.");
-      const subtaskId = await api.addTask({
+    if (!projectId) return;
+    const request = ++listToken;
+    const token = loadToken;
+    try {
+      if (taskId) await api.selectTask(taskId);
+      await api.persistDataSynced("list", `view-${projectId}`);
+      const ctx = await api.getActiveWorkContext();
+      if (
+        request === listToken && token === loadToken &&
+        state.ctx?.id === projectId && ctx?.type === "PROJECT" &&
+        ctx.id === projectId
+      ) await api.closeWorkContextView();
+    } catch (error) {
+      status(String(error), true);
+    }
+  }
+
+  async function addSubtask(taskId, title) {
+    const projectId = state.ctx?.id;
+    let subtaskId;
+    const saved = await run(async () => {
+      await latestCardTask(taskId, projectId);
+      subtaskId = await api.addTask({
         title,
         parentId: taskId,
         projectId,
       });
-      await api.selectTask(subtaskId);
     });
+    if (saved) {
+      try {
+        await api.selectTask(subtaskId);
+      } catch {
+        status(
+          "Subtask created, but native details could not open. Find it under its parent in List/details.",
+          true,
+        );
+      }
+    }
+    return saved;
   }
 
   function deleteCardTask(taskId) {
@@ -897,18 +1028,28 @@
         form.append(input, save);
         const errorMessage = el("p", "card-menu-form-error");
         errorMessage.setAttribute("role", "alert");
-        form.addEventListener("submit", (event) => {
+        let submitting = false;
+        form.addEventListener("submit", async (event) => {
           event.preventDefault();
+          if (submitting) return;
           const value = input.value.trim();
           if (!value) return;
+          submitting = true;
           try {
-            onSubmit(value);
+            const saved = await onSubmit(value);
+            if (!saved) {
+              errorMessage.textContent =
+                document.getElementById("board-status")?.textContent ||
+                "Not saved. Your draft is kept; try again.";
+              return;
+            }
+            if (activeMenu?.node === menu) closeMenu();
           } catch (error) {
             errorMessage.textContent = error.message;
             input.focus();
-            return;
+          } finally {
+            submitting = false;
           }
-          closeMenu();
         });
         menu.append(form, errorMessage);
         input.focus();
@@ -935,7 +1076,7 @@
           closeMenu();
           scheduleTask(task.id, "tomorrow");
         });
-        tool("archive", "Move to backlog in List", () => {
+        tool("archive", "Open in List to move to backlog ↗", () => {
           closeMenu();
           openTaskInList(task.id);
         });
@@ -947,7 +1088,7 @@
             task.dueDay || "",
             (value) => {
               const schedule = BoardCore.parseSchedule(value, "");
-              updateCardTask(
+              return updateCardTask(
                 task.id,
                 () => ({ ...schedule, dueWithTime: null }),
               );
@@ -962,9 +1103,19 @@
         item(
           list,
           "focus",
-          "Start focus session",
-          () => openTaskInList(task.id),
-          "List",
+          typeof api.startTracking === "function" &&
+            typeof api.dispatchAction === "function"
+            ? "Open focus setup"
+            : "Open in List for focus…",
+          () =>
+            typeof api.startTracking === "function" &&
+              typeof api.dispatchAction === "function"
+              ? openFocusSetup(task.id)
+              : openTaskInList(task.id),
+          typeof api.startTracking === "function" &&
+            typeof api.dispatchAction === "function"
+            ? "Tracks task"
+            : "List ↗",
         );
         item(list, "up", "Move to top", () => orderTask(task.id, laneId, true));
         item(
@@ -988,7 +1139,8 @@
           "A",
           true,
         ).classList.add("card-menu-shortcut-only");
-        item(list, "copy", "Duplicate", () => openTaskInList(task.id), "List");
+        item(list, "copy", "Open in List to duplicate…", () =>
+          openTaskInList(task.id), "List ↗");
         item(
           list,
           "estimate",
@@ -998,7 +1150,8 @@
               [
                 "x",
                 "Clear estimate",
-                () => updateCardTask(task.id, () => ({ timeEstimate: 0 })),
+                () =>
+                  updateCardTask(task.id, () => ({ timeEstimate: 0 })),
               ],
               ...["15m", "30m", "1h", "2h"].map((label) => [
                 "clock",
@@ -1019,7 +1172,7 @@
                     "",
                     (value) => {
                       const timeEstimate = BoardCore.parseEstimate(value);
-                      updateCardTask(task.id, () => ({ timeEstimate }));
+                      return updateCardTask(task.id, () => ({ timeEstimate }));
                     },
                   ),
                 "",
@@ -1032,9 +1185,10 @@
         item(
           list,
           "priority",
-          "Priority",
-          () => openTaskInList(task.id),
-          "List",
+          "Set priority in List…",
+          () =>
+            openTaskInList(task.id),
+          "List ↗",
         );
         item(
           list,
@@ -1042,7 +1196,9 @@
           "Toggle tags",
           () => {
             const laneTags = new Set(
-              state.config.lanes.map((lane) => lane.tagId),
+              state.config.lanes.map((lane) =>
+                lane.tagId
+              ),
             );
             options(
               "Toggle tags",
@@ -1085,7 +1241,7 @@
                     );
                   }
                 },
-                task.repeatCfgId ? "List: repeats" : "",
+                task.repeatCfgId ? "List ↗: repeats" : "",
               ]),
             ),
           "E",
@@ -1124,7 +1280,22 @@
         menu.append(list);
       });
     menu.addEventListener("keydown", (event) => {
-      const items = Array.from(menu.querySelectorAll("button"));
+      if (event.isComposing || event.ctrlKey || event.altKey || event.metaKey) {
+        return;
+      }
+      const typing = document.activeElement?.closest?.(
+        "input, textarea, select, [contenteditable]",
+      );
+      const navKey = !typing && !event.shiftKey
+        ? {
+          j: "ArrowDown",
+          k: "ArrowUp",
+          h: "ArrowLeft",
+          l: "ArrowRight",
+        }[event.key] || event.key
+        : event.key;
+      const items = Array.from(menu.querySelectorAll("button"))
+        .filter((button) => !button.disabled && !button.hidden);
       const index = items.indexOf(document.activeElement);
       const shortcut = view === "main" && !event.ctrlKey && !event.altKey &&
           !event.metaKey && !event.shiftKey &&
@@ -1141,21 +1312,24 @@
         event.preventDefault();
         if (view === "main") closeMenu();
         else showMain();
-      } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-        if (document.activeElement?.tagName === "INPUT") return;
+      } else if (navKey === "ArrowDown" || navKey === "ArrowUp") {
+        if (typing || !items.length) return;
         event.preventDefault();
+        event.stopPropagation?.();
         items[
-          (index + items.length + (event.key === "ArrowDown" ? 1 : -1)) %
+          (index + items.length + (navKey === "ArrowDown" ? 1 : -1)) %
           items.length
         ].focus();
-      } else if (event.key === "ArrowLeft" && view !== "main") {
+      } else if (navKey === "ArrowLeft" && view !== "main" && !typing) {
         event.preventDefault();
+        event.stopPropagation?.();
         showMain();
       } else if (
-        event.key === "ArrowRight" &&
+        navKey === "ArrowRight" && !typing &&
         document.activeElement?.getAttribute?.("aria-haspopup") === "true"
       ) {
         event.preventDefault();
+        event.stopPropagation?.();
         document.activeElement.click();
       } else if (shortcut) {
         event.preventDefault();
@@ -1168,7 +1342,12 @@
       if (!menu.contains(event.relatedTarget)) closeMenu(false);
     });
     document.querySelector(".shell").append(menu);
-    activeMenu = { node: menu, card };
+    activeMenu = {
+      node: menu,
+      card,
+      projectId: state.ctx.id,
+      template: state.template,
+    };
     showMain();
   }
 
@@ -1326,6 +1505,8 @@
   }, true);
 
   function renderCard(task, currentLane, nextCardId) {
+    const projectId = state.ctx.id;
+    const titleSaveKey = `${projectId}:${task.id}`;
     const card = el("article", "card");
     card.dataset.taskId = task.id;
     card.addEventListener("focus", () => {
@@ -1423,6 +1604,7 @@
     const title = el("span", "card-title", task.title || "(Untitled task)");
     const titleInput = el("input", "card-title-input");
     titleInput.dataset.taskId = task.id;
+    titleInput.dataset.projectId = task.projectId;
     titleInput.type = "text";
     titleInput.maxLength = 500;
     titleInput.hidden = true;
@@ -1431,6 +1613,7 @@
       `Edit title for ${task.title || "Untitled task"}`,
     );
     let editing = false;
+
     function stopEditing(restoreFocus = true) {
       if (!editing) return;
       editing = false;
@@ -1440,14 +1623,18 @@
       card.draggable = !task.parentId;
       if (restoreFocus) card.focus();
     }
-    function startEditing() {
-      if (editing) return;
+    function startEditing(focus = true) {
+      if (editing) {
+        if (focus) titleInput.focus();
+        return;
+      }
       editing = true;
       titleInput.value = task.title || "";
       title.hidden = true;
       titleInput.hidden = false;
+      titleInput.readOnly = state.titleSaves.has(titleSaveKey);
       card.draggable = false;
-      titleInput.focus();
+      if (focus) titleInput.focus();
       titleInput.setSelectionRange(
         titleInput.value.length,
         titleInput.value.length,
@@ -1455,9 +1642,13 @@
     }
     card.startEditing = startEditing;
     titleInput.addEventListener("click", (event) => event.stopPropagation());
-    titleInput.addEventListener("blur", () => stopEditing(false));
+    titleInput.addEventListener("blur", () => void commitTitle(false));
     titleInput.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== "Escape") return;
+      if (state.titleSaves.has(titleSaveKey)) {
+        event.preventDefault();
+        return;
+      }
       if (autocomplete.onKeydown(event)) return;
       event.preventDefault();
       event.stopPropagation();
@@ -1465,9 +1656,16 @@
         stopEditing();
         return;
       }
+      void commitTitle(true);
+    });
+    async function commitTitle(restoreFocus) {
+      if (
+        !editing || state.titleSaves.has(titleSaveKey) || rendering ||
+        !card.isConnected
+      ) return;
       const rawTitle = titleInput.value;
       if (rawTitle.trim() === task.title) {
-        stopEditing();
+        stopEditing(restoreFocus);
         return;
       }
       let parsed;
@@ -1482,13 +1680,11 @@
         status(error.message, true);
         return;
       }
-      stopEditing();
-      void run(async () => {
+      state.titleSaves.set(titleSaveKey, false);
+      titleInput.readOnly = true;
+      await run(async () => {
         try {
-          const latest = (await api.getTasks()).find((entry) =>
-            entry.id === task.id && entry.projectId === state.ctx?.id
-          );
-          if (!latest) throw new Error("Task changed or left this project.");
+          const latest = await latestCardTask(task.id, projectId);
           const patch = { title: parsed.title };
           if (parsed.tagIds.length) {
             patch.tagIds = [
@@ -1504,6 +1700,8 @@
           }
           if (parsed.timeEstimate) patch.timeEstimate = parsed.timeEstimate;
           await api.updateTask(latest.id, patch);
+          state.titleSaves.set(titleSaveKey, true);
+          stopEditing(restoreFocus && card.isConnected);
         } catch (error) {
           if (state.ctx?.id === task.projectId && card.isConnected) {
             startEditing();
@@ -1512,7 +1710,14 @@
           throw error;
         }
       });
-    });
+      state.titleSaves.delete(titleSaveKey);
+      const current = Array.from(document.querySelectorAll(".card-title-input"))
+        .find((input) =>
+          input.dataset.taskId === task.id &&
+          input.dataset.projectId === projectId
+        );
+      if (current) current.readOnly = false;
+    }
     const complete = control("", (event) => {
       event.stopPropagation();
       card.focus();
@@ -1770,8 +1975,45 @@
   }
 
   api.registerHook(api.Hooks.ANY_TASK_UPDATE, scheduleRefresh);
-  api.registerHook(api.Hooks.WORK_CONTEXT_CHANGE, scheduleRefresh);
+  api.registerHook(api.Hooks.WORK_CONTEXT_CHANGE, () => {
+    listToken++;
+    scheduleRefresh();
+  });
   api.registerHook(api.Hooks.PERSISTED_DATA_CHANGED, scheduleRefresh);
+  // Known companion commands only; source identity prevents another frame from
+  // requesting task actions. No task data or arbitrary host events cross here.
+  if (document.documentElement) {
+    document.documentElement.dataset.kanbanKeyboardCommands = "1";
+  }
+  window.addEventListener("message", (event) => {
+    if (
+      event.source !== window.parent ||
+      event.data?.type !== "superprod-keyboard-command" || !state.ctx ||
+      document.activeElement?.closest?.(
+        "input, textarea, select, [contenteditable]",
+      )
+    ) return;
+    if (event.data.command === "list") {
+      void openTaskInList();
+    } else if (event.data.command === "focus-setup" && !state.settings) {
+      const card = document.activeElement?.closest?.(".card");
+      const task = state.tasks.find((entry) =>
+        entry.id === card?.dataset.taskId
+      );
+      if (!task || task.isDone || task.subTaskIds?.length) {
+        status("Focus an unfinished card without subtasks first.", true);
+        return;
+      }
+      if (
+        typeof api.startTracking !== "function" ||
+        typeof api.dispatchAction !== "function"
+      ) {
+        status("Focus setup is unavailable here; use native List.", true);
+        return;
+      }
+      void openFocusSetup(task.id);
+    }
+  });
   document.addEventListener("keydown", (event) => {
     const key = event.key.toLowerCase();
     const inField = event.target?.closest?.(
@@ -1785,9 +2027,7 @@
       !state.ctx || event.repeat || !(controlAltK || shiftV)
     ) return;
     event.preventDefault();
-    void api.persistDataSynced("list", `view-${state.ctx.id}`)
-      .then(() => api.closeWorkContextView())
-      .catch((error) => status(String(error), true));
+    void openTaskInList();
   });
   document.addEventListener("keydown", (event) => {
     if (event.key !== "g") lastG = 0;
@@ -1897,7 +2137,7 @@
       lanes[laneIndex]?.querySelector(".add-row input")?.focus();
       return;
     } else if (
-      event.key === "d" && current?.taskId &&
+      event.key === "d" && !event.repeat && current?.taskId &&
       document.activeElement?.classList.contains("card")
     ) {
       event.preventDefault();

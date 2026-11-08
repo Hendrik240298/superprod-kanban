@@ -1,6 +1,7 @@
 :root {
   color-scheme: light dark;
   font-family: var(--font-primary-stack, system-ui, sans-serif);
+  font-size: var(--font-size-md, 14px);
 }
 * {
   box-sizing: border-box;
@@ -26,8 +27,15 @@ button:focus-visible,
 input:focus-visible,
 select:focus-visible,
 [tabindex]:focus-visible {
-  outline: 2px solid var(--c-primary, #7559d9);
-  outline-offset: 2px;
+  outline: var(--focus-ring-width, 2px) solid var(--focus-ring-color,
+    var(--c-primary, #7559d9));
+  outline-offset: var(--focus-ring-offset, 2px);
+}
+/* Cards and menu items touch scroll-container edges. Draw the complete focus
+   frame inside their own border box instead of clipping an outside outline. */
+.card:focus-visible,
+.card-menu button:focus-visible {
+  outline-offset: calc(-1 * var(--focus-ring-width, 2px));
 }
 .shell {
   min-height: 100vh;
@@ -71,6 +79,13 @@ select:focus-visible,
 }
 .status.error {
   color: var(--c-warn, #bb2828);
+}
+.focus-list-fallback {
+  border: 1px solid var(--divider-color, #aaa5);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--card-bg, #fff);
+  color: var(--text-color, #292929);
+  padding: 6px 10px;
 }
 .keyboard-help {
   margin: 0 0 var(--s, 8px);
@@ -131,9 +146,9 @@ select:focus-visible,
   margin: 0 0 var(--s, 8px);
   padding: 12px;
   border: 1px solid var(--divider-color, #aaa3);
-  border-radius: 14px;
+  border-radius: var(--card-border-radius, var(--radius-md, 10px));
   background: var(--card-bg, #fff);
-  box-shadow: var(--whiteframe-shadow-1dp, 0 1px 4px #0002);
+  box-shadow: var(--card-shadow, var(--whiteframe-shadow-1dp, 0 1px 4px #0002));
   cursor: pointer;
 }
 .card[draggable="true"] {
@@ -158,7 +173,7 @@ select:focus-visible,
   max-width: min(260px, 65vw);
   padding: 12px;
   border: 2px solid var(--c-primary, #7559d9);
-  border-radius: 14px;
+  border-radius: var(--card-border-radius, var(--radius-md, 10px));
   background: var(--card-bg, #fff);
   color: var(--text-color, #292929);
   box-shadow: var(--whiteframe-shadow-8dp, 0 6px 24px #0004);
@@ -262,6 +277,19 @@ select:focus-visible,
   background: var(--bg-lighter, #efefef);
 }
 @media (pointer: coarse) {
+  .card-complete {
+    width: 44px;
+    height: 44px;
+    margin-right: 0;
+  }
+  .card-complete::before {
+    top: 14px;
+    left: 14px;
+  }
+  .card-complete::after {
+    top: 13px;
+    left: 17px;
+  }
   .card-actions {
     width: 44px;
     height: 44px;
